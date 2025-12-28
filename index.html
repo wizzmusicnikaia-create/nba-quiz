@@ -441,6 +441,12 @@
   }
 }
 
+50%{ transform: translateZ(0) scale(1.03); filter: brightness(1.15); box-shadow: 0 0 6px rgba(47,116,255,.18), 0 14px 34px rgba(0,0,0,.30); }
+  100%{ transform: translateZ(0) scale(1); filter: brightness(1); box-shadow: 0 0 0 rgba(47,116,255,0), 0 12px 30px rgba(0,0,0,.25); }
+}
+
+
+
 /* ===== Bio (vertical teams + mini logos) ===== */
 .bioCard{
     background: rgba(255,255,255,.06);
@@ -1115,6 +1121,22 @@ const NET = {
   seed: null
 };
 
+
+function isMyTurn(){
+  // Offline: always allow
+  if(!NET.enabled) return true;
+  // When applying remote actions, we must apply regardless of local turn
+  if(NET.applyingRemote) return true;
+  // If player role not set yet, don't block
+  if(!NET.player) return true;
+  return state && state.turn === NET.player;
+}
+function requireMyTurn(){
+  if(isMyTurn()) return true;
+  toast("⛔ Δεν είναι η σειρά σου", "Παίζει ο άλλος παίκτης τώρα.", "bad");
+  return false;
+}
+
 let _origMathRandom = null;
 let db = null;
 
@@ -1141,35 +1163,44 @@ function netStatus(txt){
 
 function netInit(){
   if(db) return;
-
-  // Firebase compat SDK is loaded via a script tag (firebase-app-compat.js).
-  // so we MUST initialize like this (no ES module imports).
+  // TODO: Fill this with your Firebase Web App config
   const firebaseConfig = {
-    apiKey: "AIzaSyCIfEcwniWNldPRHl0ybaMFS2TbEYxCK3c",
-    authDomain: "nbaquiz-b68b4.firebaseapp.com",
-    databaseURL: "https://nbaquiz-b68b4-default-rtdb.europe-west1.firebasedatabase.app",
-    projectId: "nbaquiz-b68b4",
-    storageBucket: "nbaquiz-b68b4.firebasestorage.app",
-    messagingSenderId: "914584655020",
-    appId: "1:914584655020:web:785dd29c52980fc9027b09"
-  };
+  // Import the functions you need from the SDKs you need
+import { initializeApp } from "firebase/app";
+// TODO: Add SDKs for Firebase products that you want to use
+// https://firebase.google.com/docs/web/setup#available-libraries
 
+// Your web app's Firebase configuration
+const firebaseConfig = {
+  apiKey: "AIzaSyCIfEcwniWNldPRHl0ybaMFS2TbEYxCK3c",
+  authDomain: "nbaquiz-b68b4.firebaseapp.com",
+  databaseURL: "https://nbaquiz-b68b4-default-rtdb.europe-west1.firebasedatabase.app",
+  projectId: "nbaquiz-b68b4",
+  storageBucket: "nbaquiz-b68b4.firebasestorage.app",
+  messagingSenderId: "914584655020",
+  appId: "1:914584655020:web:785dd29c52980fc9027b09"
+};
+
+// Initialize Firebase
+const app = initializeApp(firebaseConfig);
+    // apiKey: "...",
+    // authDomain: "...",
+    // databaseURL: "...",
+    // projectId: "...",
+    // storageBucket: "...",
+    // messagingSenderId: "...",
+    // appId: "..."
+  };
   try{
     firebase.initializeApp(firebaseConfig);
     db = firebase.database();
-    NET.enabled = NET.enabled || false; // keep current
-    netStatus("Online ready");
   }catch(e){
-    console.warn("Firebase init failed.", e);
-    // Do NOT break offline game if Firebase fails
+    console.warn("Firebase init failed (fill firebaseConfig).", e);
+    alert("Για online rooms πρέπει να συμπληρώσεις το firebaseConfig μέσα στο HTML.");
     db = null;
     NET.enabled = false;
-    netStatus("Offline");
-    // Optional: comment out alert if you don't want popups
-    // alert("Για online rooms χρειάζεται σωστό firebaseConfig και hosting (όχι double-click file).");
   }
 }
-
 
 function makeRoomCode(len=6){
   const chars = "ABCDEFGHJKMNPQRSTUVWXYZ23456789";
@@ -1305,6 +1336,25 @@ function applyNetworkAction(a){
       // Trigger same behavior as local swap
       state.turn = state.turn === 1 ? 2 : 1;
       renderHeader();
+      break;
+
+    case "SET_LOCK":
+      state.lockedCat = (typeof a.lockedCat === "number") ? a.lockedCat : null;
+
+      // Inform both devices
+      try{
+        const n1 = (document.getElementById("p1Name")||{}).value || "P1";
+        const n2 = (document.getElementById("p2Name")||{}).value || "P2";
+        const winnerName = (a.winner === 1) ? n1 : n2;
+
+        if(state.lockedCat !== null){
+          toast("✅ Κλείδωμα κατηγορίας", `${winnerName} κλείδωσε: ${CATEGORIES[state.lockedCat].name}`, "ok");
+        }else{
+          toast("ℹ️ Χωρίς κλείδωμα", `${winnerName} δεν κλείδωσε κατηγορία`, "ok");
+        }
+      }catch(_){}
+
+      renderAll();
       break;
 
     case "ARM_X2":
@@ -1575,7 +1625,9 @@ async function startApp(){
     state.turn = (winner === 1) ? 2 : 1;
 
     const winnerName = (winner === 1) ? n1 : n2;
-    const locked = await pickLockedCategory(winnerName);
+    const locked = await pickLockedCategory(winnerName, winner);
+    // Sync locked category to the other device
+    if(NET.enabled && !NET.applyingRemote) pushAction({type:"SET_LOCK", lockedCat: (typeof locked === "number") ? locked : null, winner});
     state.lockedCat = (typeof locked === "number") ? locked : null;
 
     if(state.lockedCat !== null){
@@ -1682,13 +1734,20 @@ function runCoinToss(name1, name2){
   });
 }
 
-function pickLockedCategory(winnerName){
+function pickLockedCategory(winnerName, winnerPlayer){
   const backdrop = document.getElementById("coinBackdrop");
   const choices = document.getElementById("lockChoices");
   const skipBtn = document.getElementById("lockSkipBtn");
 
   // Build category buttons fresh each time
   choices.innerHTML = "";
+
+  const canPick = (!NET.enabled) || (NET.player === winnerPlayer);
+  if(NET.enabled && !canPick){
+    // Loser: show info and disable buttons
+    const lockBox = document.getElementById("lockBox");
+    if(lockBox) lockBox.querySelector(".muted")?.insertAdjacentHTML("beforeend", `<div style="margin-top:8px; opacity:.9;">⏳ Περιμένεις… Μόνο ο νικητής του νομίσματος επιλέγει κλείδωμα.</div>`);
+  }
 
   return new Promise(resolve => {
     const cleanup = () => {
@@ -1706,13 +1765,26 @@ function pickLockedCategory(winnerName){
         cleanup();
         resolve(idx);
       };
+      if(!canPick){
+        b.disabled = true;
+        b.style.opacity = ".55";
+        b.style.cursor = "not-allowed";
+        b.onclick = null;
+      }
       choices.appendChild(b);
     });
 
-    skipBtn.onclick = () => {
-      cleanup();
-      resolve(null);
-    };
+    if(!canPick){
+      skipBtn.disabled = true;
+      skipBtn.style.opacity = ".55";
+      skipBtn.style.cursor = "not-allowed";
+      skipBtn.onclick = null;
+    }else{
+      skipBtn.onclick = () => {
+        cleanup();
+        resolve(null);
+      };
+    }
   });
 }
 
@@ -11489,13 +11561,15 @@ function extractTwoPickOptions(prompt){
 
 
 document.getElementById("swapBtn").addEventListener("click", () => {
-  if(NET.enabled && !NET.applyingRemote) pushAction({ type:"SWAP_TURN" });
+  if(!requireMyTurn()) return;
+if(NET.enabled && !NET.applyingRemote) pushAction({ type:"SWAP_TURN" });
   state.turn = state.turn === 1 ? 2 : 1;
   renderHeader();
 });
 
 document.getElementById("x2Btn").addEventListener("click", () => {
-  if(state.current){
+  if(!requireMyTurn()) return;
+if(state.current){
     toast("⛔ x2", "Το x2 πρέπει να ενεργοποιηθεί πριν ανοίξεις ερώτηση", "bad");
     return;
   }
@@ -11515,7 +11589,9 @@ document.getElementById("closeBtn").addEventListener("click", () => { if(NET.ena
 document.getElementById("revealBtn").addEventListener("click", () => { if(NET.enabled && !NET.applyingRemote) pushAction({type:"REVEAL"}); revealAnswer(); });
 document.getElementById("checkBtn").addEventListener("click", () => { /* push happens inside checkAnswer (with guess) */ checkAnswer(); });
 document.getElementById("rerollBtn").addEventListener("click", () => { if(NET.enabled && !NET.applyingRemote) pushAction({type:"REROLL"}); rerollQuestion(); });
-fiftyBtn.addEventListener("click", () => { if(NET.enabled && !NET.applyingRemote) pushAction({type:"FIFTY"}); useFiftyFifty(); });
+fiftyBtn.addEventListener("click", () => {
+  if(!requireMyTurn()) return;
+if(NET.enabled && !NET.applyingRemote) pushAction({type:"FIFTY"}); useFiftyFifty(); });
 backdrop.addEventListener("click", (e) => { /* click outside: do nothing */ });
 
 function qId(catIndex, points, baseIndex){
@@ -11702,6 +11778,8 @@ function renderBoardMobile(){
   }
 }
 function openRandomQuestion(catIndex, points){
+  if(!requireMyTurn()) return;
+
   if(NET.enabled && !NET.applyingRemote) pushAction({ type:"OPEN_CELL", catIndex, points });
   if(state.gameEnded) return;
   const key = `${catIndex}|${points}`;
@@ -12303,6 +12381,8 @@ function revealAnswer(){
 }
 
 function checkAnswer(){
+  if(!requireMyTurn()) return;
+
   if(state.gameEnded) return;
   if(!state.current) return;
   if(state.checked) return;

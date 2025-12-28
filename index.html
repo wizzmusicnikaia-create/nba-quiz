@@ -1539,6 +1539,20 @@ break;
       useFiftyFifty();
       break;
 
+
+    case "GAME_OVER": {
+      // Force end screen on all clients (even if a client missed some state updates)
+      state.opponentBusy = false;
+      state.pendingRemote = null;
+      try{ stopTurnTimer(); }catch(e){}
+      if(typeof a.p1 === "number") state.p1 = a.p1;
+      if(typeof a.p2 === "number") state.p2 = a.p2;
+      state.gameEnded = true;
+      state.netGameOverSent = true;
+      setTimeout(() => showGameOver(), 50);
+      break;
+    }
+
     case "CLOSE_MODAL":
       closeModal(false);
       state.opponentBusy = false;
@@ -1593,7 +1607,9 @@ function initNewGameBase(){
   state.checked = false;
   state.gameEnded = false;
 
-  // Rebuild board questions for this game
+  
+  state.netGameOverSent = false;
+// Rebuild board questions for this game
   CATEGORIES = buildGameCategories();
   document.documentElement.style.setProperty("--cols", String(CATEGORIES.length));
 
@@ -1951,7 +1967,9 @@ async function startApp(){
   state.checked = false;
   state.gameEnded = false;
 
-  // Rebuild board questions for this game
+  
+  state.netGameOverSent = false;
+// Rebuild board questions for this game
   CATEGORIES = buildGameCategories();
   document.documentElement.style.setProperty("--cols", String(CATEGORIES.length));
 
@@ -11797,6 +11815,14 @@ function showGameOver(){
     document.getElementById("backdrop")?.classList.remove("show");
     document.body.classList.remove("modal-open");
   }catch(e){}
+
+  // Online: broadcast game over once so BOTH players always see the end screen
+  try{
+    if(window.NET && NET.enabled && !NET.applyingRemote && !state.netGameOverSent){
+      state.netGameOverSent = true;
+      pushAction({ type:"GAME_OVER", p1: state.p1, p2: state.p2 });
+    }
+  }catch(e){}
 playSfx("end");
   const { n1, n2 } = getPlayerNames();
   const winner =
@@ -12944,7 +12970,9 @@ function returnToHome(){
     state.current = null;
     state.checked = false;
     state.gameEnded = false;
-  }
+  
+  state.netGameOverSent = false;
+}
 
   // Κρύψε το παιχνίδι
   document.getElementById("app").style.display = "none";

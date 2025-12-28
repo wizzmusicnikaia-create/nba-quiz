@@ -95,8 +95,9 @@
       padding:18px;
       z-index:9999;
       touch-action:manipulation;
+      pointer-events:none;
     }
-    .backdrop.show{display:flex}
+    .backdrop.show{display:flex; pointer-events:auto}
     body.modal-open{overflow:hidden; touch-action:none}
     .modal{
       width:min(760px, 100%);
@@ -911,7 +912,7 @@ body{
       </div>
 
       <div class="actions" style="margin-top:14px;">
-        <button class="btn primary" id="startBtn">Έναρξη παιχνιδιού</button>
+        <button class="btn primary" id="startBtn" onclick="window.__safeStart && window.__safeStart()">Έναρξη παιχνιδιού</button>
 
 <!-- ONLINE MULTIPLAYER (optional) -->
 <div class="card" id="onlineBox" style="margin-top:14px; padding:12px; text-align:left;">
@@ -920,9 +921,9 @@ body{
     Δημιούργησε δωμάτιο σε 1 συσκευή και μπες από τη δεύτερη με τον ίδιο κωδικό. Χωρίς internet, παίζει κανονικά offline.
   </div>
   <div style="display:flex; gap:10px; flex-wrap:wrap; align-items:center;">
-    <button class="btn secondary" id="createRoomBtn">Create Room</button>
+    <button class="btn secondary" id="createRoomBtn" onclick="window.__safeCreateRoom && window.__safeCreateRoom()">Create Room</button>
     <input class="input" id="roomCode" placeholder="ROOM CODE" style="max-width:220px;" />
-    <button class="btn secondary" id="joinRoomBtn">Join Room</button>
+    <button class="btn secondary" id="joinRoomBtn" onclick="window.__safeJoinRoom && window.__safeJoinRoom()">Join Room</button>
     <span class="muted small" id="netStatus">Offline</span>
   </div>
   <div class="muted small" style="margin-top:8px;">
@@ -930,7 +931,7 @@ body{
   </div>
 </div>
 
-        <button class="btn secondary" id="howBtn">Πώς παίζεται</button>
+        <button class="btn secondary" id="howBtn" onclick="window.__safeHow && window.__safeHow()">Πώς παίζεται</button>
       </div>
 
       <div id="howBox" class="answerBox" style="display:none; margin-top:12px;">
@@ -1101,7 +1102,55 @@ body{
 
 
 <!-- Firebase (Realtime Database) for optional online rooms -->
-<script src="https://www.gstatic.com/firebasejs/10.12.5/firebase-app-compat.js"></script>
+<script src="https://www.gstatic.com/firebasejs/10.12.5/firebase-app-compat.js">
+// ==== SAFE BUTTON HANDLERS (works even if listeners fail to bind) ====
+window.__safeHow = function(){
+  const box = document.getElementById("howBox");
+  const b = document.getElementById("howBackdrop");
+  if(box && b){
+    box.style.display = "block";
+    b.classList.add("show");
+  }
+};
+
+window.__safeCreateRoom = async function(){
+  try{
+    if(typeof createRoom === "function"){ await createRoom(); return; }
+  }catch(e){ console.error(e); }
+  // Fallback: try clicking the bound listener (if any) without recursion
+  try{
+    const btn=document.getElementById("createRoomBtn");
+    if(btn){ btn.blur(); }
+  }catch(_e){}
+};
+
+window.__safeJoinRoom = async function(){
+  try{
+    if(typeof joinRoom === "function"){ await joinRoom(); return; }
+  }catch(e){ console.error(e); }
+  try{
+    const btn=document.getElementById("joinRoomBtn");
+    if(btn){ btn.blur(); }
+  }catch(_e){}
+};
+
+window.__safeStart = function(){
+  try{
+    // Prefer network start if in room and host
+    if(window.net && net.enabled){
+      if(net.role === "host"){
+        if(typeof netStartFromHost === "function"){ netStartFromHost(); return; }
+      }else{
+        // guests cannot start; just show status
+        if(typeof toast === "function") toast("Περιμένεις host", "Ο host θα ξεκινήσει το παιχνίδι.", "bad");
+        return;
+      }
+    }
+    if(typeof startApp === "function"){ startApp(); return; }
+  }catch(e){ console.error(e); }
+};
+
+</script>
 <script src="https://www.gstatic.com/firebasejs/10.12.5/firebase-database-compat.js"></script>
 
 <script>

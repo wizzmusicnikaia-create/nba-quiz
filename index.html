@@ -11899,6 +11899,30 @@ function showGameOver(opts={}){
       goMeta.textContent = "Θες ρεβάνς ή νέο παιχνίδι;";
     }
   }
+  // ===== Full-screen end overlays (winner/loser) =====
+  // Online: each device shows its own result (WIN/LOSE).
+  // Offline (same device): keep the generic Game Over modal.
+  try{ if(typeof hideEndScreens === "function") hideEndScreens(); }catch(e){}
+  try{
+    const endWinEl = document.getElementById("endWin");
+    const endLoseEl = document.getElementById("endLose");
+    const endWinText = document.getElementById("endWinText");
+    const endLoseText = document.getElementById("endLoseText");
+
+    if(winnerPlayer !== 0 && viewer && (viewer === 1 || viewer === 2) && (endWinEl || endLoseEl)){
+      const line = `${winnerName} κερδίζει • Τελικό σκορ: ${p1} - ${p2}`;
+      if(viewer === winnerPlayer){
+        if(endWinText) endWinText.textContent = line;
+        endWinEl && endWinEl.classList.add("show");
+        return;
+      }else{
+        if(endLoseText) endLoseText.textContent = line;
+        endLoseEl && endLoseEl.classList.add("show");
+        return;
+      }
+    }
+  }catch(e){}
+
 
   gameOverEl.classList.add("show");
 }
@@ -13014,7 +13038,10 @@ function returnToHome(){
   document.getElementById("backdrop")?.classList.remove("show");
   document.getElementById("gameOver")?.classList.remove("show");
 
-  // Reset βασικού state (ασφαλές)
+    try{ if(typeof hideEndScreens === "function") hideEndScreens(); }catch(e){}
+  document.getElementById("endWin")?.classList.remove("show");
+  document.getElementById("endLose")?.classList.remove("show");
+// Reset βασικού state (ασφαλές)
   if (typeof state !== "undefined") {
     state.started = false;
 
@@ -13119,19 +13146,25 @@ document.addEventListener('DOMContentLoaded', () => {
 
 
 <!-- ===== END SCREENS (WIN / LOSE) ===== -->
-<div id="endWin" class="endOverlay win">
+<div id="endWin" class="endOverlay win" role="dialog" aria-modal="true" aria-label="Νίκη">
   <div class="endCard">
-    <h1>🏆 ΝΙΚΗ!</h1>
-    <p>Συγχαρητήρια, κέρδισες το παιχνίδι.</p>
-    <button onclick="location.reload()">Νέο παιχνίδι</button>
+    <h1 id="endWinTitle">🏆 ΝΙΚΗ!</h1>
+    <p id="endWinText">Συγχαρητήρια, κέρδισες το παιχνίδι.</p>
+    <div class="endActions">
+      <button class="btn primary" id="endWinRematch">Ρεβάνς</button>
+      <button class="btn secondary" id="endWinNew">Νέο παιχνίδι</button>
+    </div>
   </div>
 </div>
 
-<div id="endLose" class="endOverlay lose">
+<div id="endLose" class="endOverlay lose" role="dialog" aria-modal="true" aria-label="Ήττα">
   <div class="endCard">
-    <h1>💔 ΗΤΤΑ</h1>
-    <p>Δεν πειράζει — πάμε για ρεβάνς.</p>
-    <button onclick="location.reload()">Νέο παιχνίδι</button>
+    <h1 id="endLoseTitle">💔 ΗΤΤΑ</h1>
+    <p id="endLoseText">Δεν πειράζει — πάμε για ρεβάνς.</p>
+    <div class="endActions">
+      <button class="btn primary" id="endLoseRematch">Ρεβάνς</button>
+      <button class="btn secondary" id="endLoseNew">Νέο παιχνίδι</button>
+    </div>
   </div>
 </div>
 
@@ -13151,33 +13184,58 @@ document.addEventListener('DOMContentLoaded', () => {
   padding:30px;
   border-radius:20px;
   text-align:center;
+  max-width:min(520px, 92vw);
+  box-shadow:0 20px 60px rgba(0,0,0,.55);
+}
+.endActions{
+  display:flex;
+  gap:10px;
+  justify-content:center;
+  flex-wrap:wrap;
+  margin-top:16px;
 }
 .endOverlay.win .endCard{ border:3px solid #2ecc71; }
 .endOverlay.lose .endCard{ border:3px solid #e74c3c; }
 </style>
 
 <script>
-function forceEndScreens(){
-  if(!window.state) return;
-  const p1 = state.p1||0;
-  const p2 = state.p2||0;
+(function(){
+  // Helpers to show/hide end overlays safely
+  window.hideEndScreens = function(){
+    try{ document.getElementById("endWin")?.classList.remove("show"); }catch(e){}
+    try{ document.getElementById("endLose")?.classList.remove("show"); }catch(e){}
+  };
 
-  const meIsP1 = !window.NET || NET.isHost;
-  let iWin = false;
+  // Button wiring (no inline onclick)
+  function wire(btnId, fn){
+    const el=document.getElementById(btnId);
+    if(el) el.addEventListener("click", fn);
+  }
 
-  if(p1 === p2) return; // ignore tie for now
-  if(meIsP1 && p1 > p2) iWin = true;
-  if(!meIsP1 && p2 > p1) iWin = true;
+  function doRematch(){
+    // Same behavior as GameOver "Ρεβάνς"
+    try{
+      const goRematch = document.getElementById("goRematch");
+      if(goRematch){ goRematch.click(); return; }
+    }catch(e){}
+    try{
+      // Fallback: click Start
+      const startBtn = document.getElementById("startBtn");
+      if(startBtn){ startBtn.click(); return; }
+    }catch(e){}
+    try{ if(typeof startApp === "function"){ startApp(); } }catch(e){}
+  }
 
-  document.getElementById(iWin ? "endWin" : "endLose").classList.add("show");
-}
+  function doNew(){
+    try{
+      if(typeof returnToHome === "function"){ returnToHome(); return; }
+    }catch(e){}
+    try{ location.reload(); }catch(e){}
+  }
 
-// hard hook: whenever gameOver is detected
-const _origShowGameOver = window.showGameOver;
-window.showGameOver = function(){
-  try{ forceEndScreens(); }catch(e){}
-  if(_origShowGameOver) _origShowGameOver();
-};
+  ["endWinRematch","endLoseRematch"].forEach(id => wire(id, () => { hideEndScreens(); doRematch(); }));
+  ["endWinNew","endLoseNew"].forEach(id => wire(id, () => { hideEndScreens(); doNew(); }));
+})();
 </script>
 
 </body>

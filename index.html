@@ -12450,6 +12450,7 @@ function finalizeAnswer(ok){
   if(!state.current) return;
   if(state.checked) return;
 
+  const beforeTurn = state.turn;
   const { catIndex, points, baseIndex } = state.current;
   const cellKey = `${catIndex}|${points}`;
 
@@ -12502,6 +12503,26 @@ function finalizeAnswer(ok){
   if(checkMathematicalGameOver()) return;
 
   state.turn = state.turn === 1 ? 2 : 1;
+
+  // Online: broadcast ONLY the scored outcome (spectator mode)
+  // IMPORTANT: finalizeAnswer can be triggered by many paths (check, 50-50 buttons, yes/no, etc.)
+  // so we broadcast here once, to avoid desync where both players get stuck.
+  if(NET.enabled && !NET.applyingRemote){
+    // If you replay network actions locally, skip broadcasting.
+    // NOTE: for local play, "beforeTurn" is the player who just answered.
+    pushAction({
+      type:"ANSWER_RESULT",
+      ok,
+      awardPoints,
+      fromPlayer: beforeTurn,
+      catIndex,
+      points,
+      baseIndex,
+      nextTurn: state.turn
+    });
+    pushAction({ type:"QUESTION_DONE" });
+  }
+
   renderAll();
 }
 
@@ -12615,22 +12636,6 @@ function checkAnswer(){
   if(state.current?.x2Active) awardPoints *= 2;
 
   finalizeAnswer(ok);
-
-  // After finalizeAnswer, turn has already swapped
-  if(NET.enabled && !NET.applyingRemote){
-    pushAction({
-      type:"ANSWER_RESULT",
-      ok,
-      awardPoints,
-      fromPlayer: beforeTurn,
-      catIndex,
-      points,
-      baseIndex,
-      nextTurn: state.turn
-    });
-    // Also tell others to clear waiting state
-    pushAction({ type:"QUESTION_DONE" });
-  }
 }
 
 function closeModal(force){

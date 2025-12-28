@@ -441,12 +441,6 @@
   }
 }
 
-50%{ transform: translateZ(0) scale(1.03); filter: brightness(1.15); box-shadow: 0 0 6px rgba(47,116,255,.18), 0 14px 34px rgba(0,0,0,.30); }
-  100%{ transform: translateZ(0) scale(1); filter: brightness(1); box-shadow: 0 0 0 rgba(47,116,255,0), 0 12px 30px rgba(0,0,0,.25); }
-}
-
-
-
 /* ===== Bio (vertical teams + mini logos) ===== */
 .bioCard{
     background: rgba(255,255,255,.06);
@@ -1148,7 +1142,7 @@ function netStatus(txt){
 function netInit(){
   if(db) return;
 
-  // Firebase compat SDK is loaded via <script src="...firebase-app-compat.js"></script>
+  // Firebase compat SDK is loaded via a script tag (firebase-app-compat.js).
   // so we MUST initialize like this (no ES module imports).
   const firebaseConfig = {
     apiKey: "AIzaSyCIfEcwniWNldPRHl0ybaMFS2TbEYxCK3c",

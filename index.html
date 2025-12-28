@@ -1296,7 +1296,16 @@ function applyNetworkAction(a){
       break;
     }
     case "OPEN_CELL":
-      openRandomQuestion(a.catIndex, a.points, { from: a.from });
+      // Spectator mode: do NOT reveal the question to the other player.
+      if(NET.enabled && a.from !== NET.player){
+        state.opponentAnswering = true;
+        state.opponentCell = { catIndex: a.catIndex, points: a.points };
+        state.previewCat = null;
+        renderBoard();
+        toast("⏳ Ο αντίπαλος απαντά…", "Περίμενε να ολοκληρώσει.", "warn");
+      } else {
+        openRandomQuestion(a.catIndex, a.points);
+      }
       break;
 
     case "CHECK_ANSWER":
@@ -1305,6 +1314,26 @@ function applyNetworkAction(a){
       }
       checkAnswer();
       break;
+
+
+    case "ANSWER_RESULT": {
+      // Apply scoring/turn without showing the question
+      if(typeof a.p1 === "number") state.p1 = a.p1;
+      if(typeof a.p2 === "number") state.p2 = a.p2;
+
+      if(typeof a.catIndex === "number" && typeof a.points === "number"){
+        const cellKey = `${a.catIndex}|${a.points}`;
+        state.usedCells.add(cellKey);
+      }
+
+      // Clear spectator lock
+      state.opponentAnswering = false;
+      state.opponentCell = null;
+
+      if(typeof a.nextTurn === "number") state.turn = a.nextTurn;
+      renderAll();
+      break;
+    }
 
     case "REVEAL":
       revealAnswer();
@@ -11228,6 +11257,8 @@ const state = {
 lockedCat: null,
   previewCat: null,
   coinWinner: null,
+  opponentAnswering: false,
+  opponentCell: null,
 
   // 1 ανά κελί: όταν απαντηθεί, κλειδώνει το κελί (όχι οι "ερωτήσεις" του base pool)
   usedCells: new Set(),
@@ -11613,8 +11644,19 @@ function renderHeader(){
 
 
 function toggleCategoryPreview(c){
+  // Online turn-gate: only the active player can interact
+  if(NET.enabled && !NET.applyingRemote){
+    if(state.opponentAnswering){
+      toast("⏳ Περιμένεις…", "Ο αντίπαλος απαντά.", "warn");
+      return;
+    }
+    if(state.turn !== NET.player){
+      toast("⛔ Όχι τώρα", "Δεν είναι η σειρά σου.", "warn");
+      return;
+    }
+  }
+
   // Επιλογή κατηγορίας για να εμφανιστούν οι δυσκολίες της.
-  // Δεν κάνουμε "snap" στην κλειδωμένη κατηγορία: οι άλλες κατηγορίες πρέπει να παραμένουν διαθέσιμες.
   state.previewCat = (state.previewCat === c) ? null : c;
   renderBoard();
 }
@@ -11723,9 +11765,20 @@ function renderBoardMobile(){
     board.appendChild(wrap);
   }
 }
-function openRandomQuestion(catIndex, points, opts){
-  opts = opts || {};
-  if(NET.enabled && !NET.applyingRemote) pushAction({ type:"OPEN_CELL", catIndex, points });
+function openRandomQuestion(catIndex, points){
+  // Online turn-gate: only active player can open a cell
+  if(NET.enabled && !NET.applyingRemote){
+    if(state.opponentAnswering){
+      toast("⏳ Περιμένεις…", "Ο αντίπαλος απαντά.", "warn");
+      return;
+    }
+    if(state.turn !== NET.player){
+      toast("⛔ Όχι τώρα", "Δεν είναι η σειρά σου.", "warn");
+      return;
+    }
+    pushAction({ type:"OPEN_CELL", catIndex, points, opener: NET.player });
+  }
+
   if(state.gameEnded) return;
   const key = `${catIndex}|${points}`;
   if(state.usedCells.has(key)){
@@ -11749,7 +11802,7 @@ function openRandomQuestion(catIndex, points, opts){
     state.x2Armed = {active:true, owner: state.turn};
   }
 
-  setCurrentQuestion(catIndex, points, 0, opts);
+  setCurrentQuestion(catIndex, points, 0);
 }
 
 
@@ -11809,11 +11862,11 @@ function rerollQuestion(){
     state.x2Armed = {active:true, owner: state.turn};
   }
 
-  setCurrentQuestion(catIndex, points, 0, opts);
+  setCurrentQuestion(catIndex, points, 0);
 }
 
 
-function setCurrentQuestion(catIndex, points, chosenIndex, opts){
+function setCurrentQuestion(catIndex, points, chosenIndex){
   const pool = CATEGORIES[catIndex].pools[points] || [];
   let q = pool[chosenIndex];
 
@@ -11842,24 +11895,13 @@ function setCurrentQuestion(catIndex, points, chosenIndex, opts){
 
   fiftyOptions.style.display = "none";
   fiftyOptions.innerHTML = "";
-  // Always reset modal controls (important for online spectator mode)
   mInput.disabled = false;
-  mInput.placeholder = "Γράψε την απάντησή σου (ΕΛ ή EN)...";
-  checkBtn.disabled = false;
-  rerollBtn.disabled = false;
-  revealBtn.disabled = false;
-  closeBtn.disabled = false;
-  // fiftyBtn gets recalculated on next open; enable by default here
-  fiftyBtn.disabled = false;
+  document.getElementById("checkBtn").disabled = false;
 
   yesNoBox.style.display = "none";
   mInput.style.display = "";
   document.getElementById("checkBtn").style.display = "";
 
-
-  // Online spectator mode: when the other device opens a cell, do NOT show the question text or allow input.
-  const spectatorMode = !!(NET.enabled && NET.applyingRemote && opts && typeof opts.from === "number" && opts.from !== NET.player);
-  state.current.spectator = spectatorMode;
   mTitle.textContent = `Παίκτης ${state.turn} απαντά`;
   mMeta.textContent = `${CATEGORIES[catIndex].name}`;
   mPoints.textContent = `${points} βαθμός${points===1 ? "" : "ί"} • Απομένουν: ${remainingInCell(catIndex, points)}`;
@@ -11872,35 +11914,6 @@ function setCurrentQuestion(catIndex, points, chosenIndex, opts){
   fiftyBtn.textContent = `50-50 (${state.lifelines[state.turn]})`;
 
   mInput.value = "";
-  // Apply spectator UI (hide question + disable controls)
-  if(spectatorMode){
-    mQuestion.textContent = "⏳ Ο αντίπαλος απαντά... (η ερώτηση δεν εμφανίζεται στον άλλο παίκτη)";
-    mInput.disabled = true;
-    mInput.placeholder = "Περιμένεις τον αντίπαλο...";
-    checkBtn.disabled = true;
-    rerollBtn.disabled = true;
-    fiftyBtn.disabled = true;
-    revealBtn.disabled = true;
-    closeBtn.disabled = true;
-    pickBox.style.display = "none";
-    yesNoBox.style.display = "none";
-  }else{
-    mInput.disabled = false;
-    closeBtn.disabled = false;
-  }
-
-  // If spectator, stop here (don't render question/choices). We'll just show a waiting modal.
-  if(spectatorMode){
-    applyTheme(catIndex);
-    playSfx("open");
-    startTurnTimer();
-    backdrop.classList.add("show");
-    document.body.classList.add("modal-open");
-    try{ mInput.blur(); }catch(e){}
-    return;
-  }
-
-
 
   const isYesNo = isYesNoQ(q, catIndex);
   const isTwoPick = (CATEGORIES[catIndex].name === "Δύο παίκτες • Ποιος έχει περισσότερα;");
@@ -11952,15 +11965,8 @@ function setCurrentQuestion(catIndex, points, chosenIndex, opts){
   state.current.fiftyUsed = false;
   fiftyOptions.style.display = "none";
   fiftyOptions.innerHTML = "";
-  // Always reset modal controls (important for online spectator mode)
   mInput.disabled = false;
-  mInput.placeholder = "Γράψε την απάντησή σου (ΕΛ ή EN)...";
-  checkBtn.disabled = false;
-  rerollBtn.disabled = false;
-  revealBtn.disabled = false;
-  closeBtn.disabled = false;
-  // fiftyBtn gets recalculated on next open; enable by default here
-  fiftyBtn.disabled = false;
+  document.getElementById("checkBtn").disabled = false;
   mAnswerBox.style.display = "none";
   mAnswerBox.innerHTML = "";
 
@@ -12253,6 +12259,23 @@ function finalizeAnswer(ok){
   // Σημειώνουμε ποια base ερώτηση παίχτηκε (για να μην ξαναέρθει σε reroll αλλού)
   state.usedQuestionIds.add(qId(catIndex, points, baseIndex));
 
+  // Online: broadcast ONLY the result (not the question/guess)
+  if(NET.enabled && !NET.applyingRemote){
+    const award = awardPoints;
+    const nextTurn = state.turn === 1 ? 2 : 1;
+    pushAction({
+      type: "ANSWER_RESULT",
+      ok: !!ok,
+      award,
+      catIndex,
+      points,
+      baseIndex,
+      nextTurn,
+      p1: state.p1,
+      p2: state.p2
+    });
+  }
+
   if(ok){
     if(state.turn === 1) state.p1 += awardPoints;
     else state.p2 += awardPoints;
@@ -12282,15 +12305,8 @@ function finalizeAnswer(ok){
   // επαναφορά UI 50-50
   fiftyOptions.style.display = "none";
   fiftyOptions.innerHTML = "";
-  // Always reset modal controls (important for online spectator mode)
   mInput.disabled = false;
-  mInput.placeholder = "Γράψε την απάντησή σου (ΕΛ ή EN)...";
-  checkBtn.disabled = false;
-  rerollBtn.disabled = false;
-  revealBtn.disabled = false;
-  closeBtn.disabled = false;
-  // fiftyBtn gets recalculated on next open; enable by default here
-  fiftyBtn.disabled = false;
+  document.getElementById("checkBtn").disabled = false;
 
   // Έλεγχος "μαθηματικού" τέλους: αν κάποιος δεν μπορεί να κερδίσει
   if(checkMathematicalGameOver()) return;
@@ -12343,15 +12359,8 @@ function useFiftyFifty(){
 
   // ΔΕΝ κλειδώνουμε το input: ο παίκτης μπορεί είτε να διαλέξει από τα 2 κουμπιά
   // είτε να γράψει απάντηση και να πατήσει “Έλεγχος”.
-  // Always reset modal controls (important for online spectator mode)
   mInput.disabled = false;
-  mInput.placeholder = "Γράψε την απάντησή σου (ΕΛ ή EN)...";
-  checkBtn.disabled = false;
-  rerollBtn.disabled = false;
-  revealBtn.disabled = false;
-  closeBtn.disabled = false;
-  // fiftyBtn gets recalculated on next open; enable by default here
-  fiftyBtn.disabled = false;
+  document.getElementById("checkBtn").disabled = false;
 
   fiftyOptions.style.display = "block";
   fiftyOptions.innerHTML = `
@@ -12393,9 +12402,8 @@ function checkAnswer(){
 
   const guess = mInput.value;
 
-  if(NET.enabled && !NET.applyingRemote){
-    pushAction({ type:"CHECK_ANSWER", guess });
-  }
+  // Online: do NOT broadcast the guess (keeps the question private)
+
   if(!guess || !guess.trim()){
     alert("Γράψε μια απάντηση.");
     return;
@@ -12421,15 +12429,8 @@ function closeModal(force){
   fiftyOptions.innerHTML = "";
   mX2.style.display = "none";
   mX2.classList.remove("pulseGlow","popOnce");
-  // Always reset modal controls (important for online spectator mode)
   mInput.disabled = false;
-  mInput.placeholder = "Γράψε την απάντησή σου (ΕΛ ή EN)...";
-  checkBtn.disabled = false;
-  rerollBtn.disabled = false;
-  revealBtn.disabled = false;
-  closeBtn.disabled = false;
-  // fiftyBtn gets recalculated on next open; enable by default here
-  fiftyBtn.disabled = false;
+  document.getElementById("checkBtn").disabled = false;
   if(force) return;
   renderAll();
 }

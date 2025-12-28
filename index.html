@@ -1539,20 +1539,6 @@ break;
       useFiftyFifty();
       break;
 
-
-    case "GAME_OVER": {
-      // Force end screen on all clients (even if a client missed some state updates)
-      state.opponentBusy = false;
-      state.pendingRemote = null;
-      try{ stopTurnTimer(); }catch(e){}
-      if(typeof a.p1 === "number") state.p1 = a.p1;
-      if(typeof a.p2 === "number") state.p2 = a.p2;
-      state.gameEnded = true;
-      state.netGameOverSent = true;
-      setTimeout(() => showGameOver(), 50);
-      break;
-    }
-
     case "CLOSE_MODAL":
       closeModal(false);
       state.opponentBusy = false;
@@ -1573,6 +1559,17 @@ break;
       renderAll();
       break;
 
+    case "GAME_OVER": {
+      // Host broadcasts final score so BOTH devices always show end screen.
+      if(typeof a.p1 === "number") state.p1 = a.p1;
+      if(typeof a.p2 === "number") state.p2 = a.p2;
+      state.gameEnded = true;
+      state.opponentBusy = false;
+      state.pendingRemote = null;
+      state.opponentBusySince = 0;
+      showGameOver({ p1: state.p1, p2: state.p2, reason: a.reason || "END", fromNet: true });
+      break;
+    }
 
 
     case "ARM_X2":
@@ -1606,10 +1603,9 @@ function initNewGameBase(){
   state.current = null;
   state.checked = false;
   state.gameEnded = false;
+  state.sentGameOver = false;
 
-  
-  state.netGameOverSent = false;
-// Rebuild board questions for this game
+  // Rebuild board questions for this game
   CATEGORIES = buildGameCategories();
   document.documentElement.style.setProperty("--cols", String(CATEGORIES.length));
 
@@ -1966,10 +1962,9 @@ async function startApp(){
   state.current = null;
   state.checked = false;
   state.gameEnded = false;
+  state.sentGameOver = false;
 
-  
-  state.netGameOverSent = false;
-// Rebuild board questions for this game
+  // Rebuild board questions for this game
   CATEGORIES = buildGameCategories();
   document.documentElement.style.setProperty("--cols", String(CATEGORIES.length));
 
@@ -11807,36 +11802,105 @@ function startTurnTimer(){
   }, 200);
 }
 
-function showGameOver(){
+function showGameOver(opts={}){
+  // opts: {p1,p2, reason, fromNet}
+  const p1 = (typeof opts.p1 === "number") ? opts.p1 : state.p1;
+  const p2 = (typeof opts.p2 === "number") ? opts.p2 : state.p2;
 
-  // Ensure any question modal/backdrop is closed before showing the winner screen
+  // Idempotent: don't re-open / re-push
+  if(gameOverEl.classList.contains("show")) return;
+
+  // Mark ended + unlock any waiting state (online safety)
+  state.gameEnded = true;
+  state.opponentBusy = false;
+  state.pendingRemote = null;
+  state.opponentBusySince = 0;
+
+  // Ensure any question modal/backdrop is closed before showing the end screen
   try{ closeModal(true); }catch(e){}
   try{
     document.getElementById("backdrop")?.classList.remove("show");
     document.body.classList.remove("modal-open");
   }catch(e){}
 
-  // Online: broadcast game over once so BOTH players always see the end screen
+  // Online: make sure BOTH devices show end screen.
+  // Only host broadcasts once.
   try{
-    if(window.NET && NET.enabled && !NET.applyingRemote && !state.netGameOverSent){
-      state.netGameOverSent = true;
-      pushAction({ type:"GAME_OVER", p1: state.p1, p2: state.p2 });
+    if(window.NET && NET.enabled && NET.isHost && !state.sentGameOver && !opts.fromNet){
+      state.sentGameOver = true;
+      pushAction({ type:"GAME_OVER", p1, p2, reason: opts.reason || "END" });
     }
-  }catch(e){}
-playSfx("end");
-  const { n1, n2 } = getPlayerNames();
-  const winner =
-    state.p1 === state.p2 ? "Ισοπαλία!" :
-    (state.p1 > state.p2 ? `Νικητής: ${n1}!` : `Νικητής: ${n2}!`);
+  }catch(_e){}
 
-  goTitle.textContent = "🏁 Τέλος παιχνιδιού";
-  goSub.textContent = `${winner} • Τελικό σκορ: ${state.p1} - ${state.p2}`;
+  try{ playSfx("end"); }catch(_e){}
+
+  const { n1, n2 } = getPlayerNames();
+  const winnerPlayer = (p1 === p2) ? 0 : (p1 > p2 ? 1 : 2);
+  const winnerName = (winnerPlayer === 1) ? n1 : (winnerPlayer === 2 ? n2 : null);
+
+  // Viewer perspective (online = each device knows its player)
+  const viewer = (window.NET && NET.enabled && (NET.player === 1 || NET.player === 2)) ? NET.player : 0;
+
+  // Base fill
   goP1Name.textContent = n1;
   goP2Name.textContent = n2;
-  goP1Score.textContent = String(state.p1);
-  goP2Score.textContent = String(state.p2);
+  goP1Score.textContent = String(p1);
+  goP2Score.textContent = String(p2);
 
-    gameOverEl.classList.add("show");
+  // Reset box classes then re-apply
+  goP1Box.classList.remove("win","lose","tie");
+  goP2Box.classList.remove("win","lose","tie");
+
+  // Winner / tie highlighting on both devices
+  if(winnerPlayer === 0){
+    goP1Box.classList.add("tie");
+    goP2Box.classList.add("tie");
+  }else if(winnerPlayer === 1){
+    goP1Box.classList.add("win");
+    goP2Box.classList.add("lose");
+  }else{
+    goP1Box.classList.add("lose");
+    goP2Box.classList.add("win");
+  }
+
+  // Winner row (always visible except tie)
+  if(winnerPlayer === 0){
+    goWinnerRow.style.display = "none";
+  }else{
+    goWinnerRow.style.display = "";
+    goWinnerText.textContent = `Νικητής: ${winnerName}!`;
+  }
+
+  // Title/sub + badge differ for winner vs loser (per device), tie is shared.
+  if(winnerPlayer === 0){
+    goBadge.textContent = "🤝";
+    goTitle.textContent = "Ισοπαλία!";
+    goSub.textContent = `Τελικό σκορ: ${p1} - ${p2}`;
+    goMeta.textContent = "Κανείς δεν κέρδισε — ωραίο παιχνίδι! Θες ρεβάνς;";
+  }else{
+    const isWinnerViewer = (viewer !== 0 && viewer === winnerPlayer);
+    const isLoserViewer  = (viewer !== 0 && viewer !== winnerPlayer);
+
+    if(isWinnerViewer){
+      goBadge.textContent = "🏆";
+      goTitle.textContent = "ΝΙΚΗ!";
+      goSub.textContent = `${winnerName} κερδίζει • Τελικό σκορ: ${p1} - ${p2}`;
+      goMeta.textContent = "Συγχαρητήρια! Πάτα «Ρεβάνς» για να συνεχίσετε.";
+    }else if(isLoserViewer){
+      goBadge.textContent = "💔";
+      goTitle.textContent = "ΗΤΤΑ";
+      goSub.textContent = `${winnerName} κερδίζει • Τελικό σκορ: ${p1} - ${p2}`;
+      goMeta.textContent = "Καλύτερη τύχη στην επόμενη! Πάτα «Ρεβάνς» για άλλη μια.";
+    }else{
+      // Offline / unknown viewer: generic
+      goBadge.textContent = "🏁";
+      goTitle.textContent = "Τέλος παιχνιδιού";
+      goSub.textContent = `Νικητής: ${winnerName} • Τελικό σκορ: ${p1} - ${p2}`;
+      goMeta.textContent = "Θες ρεβάνς ή νέο παιχνίδι;";
+    }
+  }
+
+  gameOverEl.classList.add("show");
 }
 
 function hideGameOver(){
@@ -12914,12 +12978,12 @@ function checkMathematicalGameOver(){
   // If someone cannot even reach a tie, end immediately.
   if(p1Max < state.p2){
     state.gameEnded = true;
-    showGameOver();
+    showGameOver({ reason: 'EARLY_WIN' });
     return true;
   }
   if(p2Max < state.p1){
     state.gameEnded = true;
-    showGameOver();
+    showGameOver({ reason: 'EARLY_WIN' });
     return true;
   }
   return false;
@@ -12931,7 +12995,7 @@ function renderAll(){
   if(totalRemaining() === 0){
     state.gameEnded = true;
     const msg = state.p1 === state.p2 ? "Ισοπαλία!" : (state.p1 > state.p2 ? "Νικητής: Παίκτης 1!" : "Νικητής: Παίκτης 2!");
-    setTimeout(() => showGameOver(), 80);
+    setTimeout(() => showGameOver({ reason: 'BOARD_EXHAUSTED' }), 80);
   }
 }
 
@@ -12970,9 +13034,8 @@ function returnToHome(){
     state.current = null;
     state.checked = false;
     state.gameEnded = false;
-  
-  state.netGameOverSent = false;
-}
+  state.sentGameOver = false;
+  }
 
   // Κρύψε το παιχνίδι
   document.getElementById("app").style.display = "none";

@@ -1147,44 +1147,35 @@ function netStatus(txt){
 
 function netInit(){
   if(db) return;
-  // TODO: Fill this with your Firebase Web App config
+
+  // Firebase compat SDK is loaded via <script src="...firebase-app-compat.js"></script>
+  // so we MUST initialize like this (no ES module imports).
   const firebaseConfig = {
-  // Import the functions you need from the SDKs you need
-import { initializeApp } from "firebase/app";
-// TODO: Add SDKs for Firebase products that you want to use
-// https://firebase.google.com/docs/web/setup#available-libraries
-
-// Your web app's Firebase configuration
-const firebaseConfig = {
-  apiKey: "AIzaSyCIfEcwniWNldPRHl0ybaMFS2TbEYxCK3c",
-  authDomain: "nbaquiz-b68b4.firebaseapp.com",
-  databaseURL: "https://nbaquiz-b68b4-default-rtdb.europe-west1.firebasedatabase.app",
-  projectId: "nbaquiz-b68b4",
-  storageBucket: "nbaquiz-b68b4.firebasestorage.app",
-  messagingSenderId: "914584655020",
-  appId: "1:914584655020:web:785dd29c52980fc9027b09"
-};
-
-// Initialize Firebase
-const app = initializeApp(firebaseConfig);
-    // apiKey: "...",
-    // authDomain: "...",
-    // databaseURL: "...",
-    // projectId: "...",
-    // storageBucket: "...",
-    // messagingSenderId: "...",
-    // appId: "..."
+    apiKey: "AIzaSyCIfEcwniWNldPRHl0ybaMFS2TbEYxCK3c",
+    authDomain: "nbaquiz-b68b4.firebaseapp.com",
+    databaseURL: "https://nbaquiz-b68b4-default-rtdb.europe-west1.firebasedatabase.app",
+    projectId: "nbaquiz-b68b4",
+    storageBucket: "nbaquiz-b68b4.firebasestorage.app",
+    messagingSenderId: "914584655020",
+    appId: "1:914584655020:web:785dd29c52980fc9027b09"
   };
+
   try{
     firebase.initializeApp(firebaseConfig);
     db = firebase.database();
+    NET.enabled = NET.enabled || false; // keep current
+    netStatus("Online ready");
   }catch(e){
-    console.warn("Firebase init failed (fill firebaseConfig).", e);
-    alert("Για online rooms πρέπει να συμπληρώσεις το firebaseConfig μέσα στο HTML.");
+    console.warn("Firebase init failed.", e);
+    // Do NOT break offline game if Firebase fails
     db = null;
     NET.enabled = false;
+    netStatus("Offline");
+    // Optional: comment out alert if you don't want popups
+    // alert("Για online rooms χρειάζεται σωστό firebaseConfig και hosting (όχι double-click file).");
   }
 }
+
 
 function makeRoomCode(len=6){
   const chars = "ABCDEFGHJKMNPQRSTUVWXYZ23456789";

@@ -255,7 +255,7 @@
 }
 
 /* Coin toss modal */
-#coinBackdrop{ z-index: 20000; }
+#coinBackdrop{ z-index: 30000; }
 #coinBackdrop .modal{ max-width: 640px; text-align:center; }
 .coinWrap{ display:flex; justify-content:center; margin:14px 0 10px; }
 .coin{
@@ -11839,9 +11839,13 @@ function renderHeader(){
   x2p1.textContent = state.x2Left[1];
   x2p2.textContent = state.x2Left[2];
 
-  const canArmX2 = (!state.current) && (state.x2Left[state.turn] > 0) && !state.x2Armed.active;
+  const isMyTurnOnline = (!NET.enabled) || (NET.player === state.turn);
+  const canArmX2 = isMyTurnOnline && !state.opponentBusy && (!state.current) && (state.x2Left[state.turn] > 0) && !state.x2Armed.active;
   x2Btn.disabled = !canArmX2;
-  x2Btn.classList.toggle("x2Armed", state.x2Armed.active);
+  x2Btn\.classList\.toggle\("x2Armed", state\.x2Armed\.active\);
+  if(NET.enabled && (NET.player !== state.turn || state.opponentBusy)){
+    x2Btn.disabled = true;
+  }
   if(state.current && state.current.x2Active){
     x2Btn.textContent = "x2 🔥";
   }else{

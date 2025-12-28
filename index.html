@@ -1296,7 +1296,7 @@ function applyNetworkAction(a){
       break;
     }
     case "OPEN_CELL":
-      openRandomQuestion(a.catIndex, a.points);
+      openRandomQuestion(a.catIndex, a.points, { from: a.from });
       break;
 
     case "CHECK_ANSWER":
@@ -11723,7 +11723,8 @@ function renderBoardMobile(){
     board.appendChild(wrap);
   }
 }
-function openRandomQuestion(catIndex, points){
+function openRandomQuestion(catIndex, points, opts){
+  opts = opts || {};
   if(NET.enabled && !NET.applyingRemote) pushAction({ type:"OPEN_CELL", catIndex, points });
   if(state.gameEnded) return;
   const key = `${catIndex}|${points}`;
@@ -11748,7 +11749,7 @@ function openRandomQuestion(catIndex, points){
     state.x2Armed = {active:true, owner: state.turn};
   }
 
-  setCurrentQuestion(catIndex, points, 0);
+  setCurrentQuestion(catIndex, points, 0, opts);
 }
 
 
@@ -11808,11 +11809,11 @@ function rerollQuestion(){
     state.x2Armed = {active:true, owner: state.turn};
   }
 
-  setCurrentQuestion(catIndex, points, 0);
+  setCurrentQuestion(catIndex, points, 0, opts);
 }
 
 
-function setCurrentQuestion(catIndex, points, chosenIndex){
+function setCurrentQuestion(catIndex, points, chosenIndex, opts){
   const pool = CATEGORIES[catIndex].pools[points] || [];
   let q = pool[chosenIndex];
 
@@ -11841,13 +11842,24 @@ function setCurrentQuestion(catIndex, points, chosenIndex){
 
   fiftyOptions.style.display = "none";
   fiftyOptions.innerHTML = "";
+  // Always reset modal controls (important for online spectator mode)
   mInput.disabled = false;
-  document.getElementById("checkBtn").disabled = false;
+  mInput.placeholder = "Γράψε την απάντησή σου (ΕΛ ή EN)...";
+  checkBtn.disabled = false;
+  rerollBtn.disabled = false;
+  revealBtn.disabled = false;
+  closeBtn.disabled = false;
+  // fiftyBtn gets recalculated on next open; enable by default here
+  fiftyBtn.disabled = false;
 
   yesNoBox.style.display = "none";
   mInput.style.display = "";
   document.getElementById("checkBtn").style.display = "";
 
+
+  // Online spectator mode: when the other device opens a cell, do NOT show the question text or allow input.
+  const spectatorMode = !!(NET.enabled && NET.applyingRemote && opts && typeof opts.from === "number" && opts.from !== NET.player);
+  state.current.spectator = spectatorMode;
   mTitle.textContent = `Παίκτης ${state.turn} απαντά`;
   mMeta.textContent = `${CATEGORIES[catIndex].name}`;
   mPoints.textContent = `${points} βαθμός${points===1 ? "" : "ί"} • Απομένουν: ${remainingInCell(catIndex, points)}`;
@@ -11860,6 +11872,35 @@ function setCurrentQuestion(catIndex, points, chosenIndex){
   fiftyBtn.textContent = `50-50 (${state.lifelines[state.turn]})`;
 
   mInput.value = "";
+  // Apply spectator UI (hide question + disable controls)
+  if(spectatorMode){
+    mQuestion.textContent = "⏳ Ο αντίπαλος απαντά... (η ερώτηση δεν εμφανίζεται στον άλλο παίκτη)";
+    mInput.disabled = true;
+    mInput.placeholder = "Περιμένεις τον αντίπαλο...";
+    checkBtn.disabled = true;
+    rerollBtn.disabled = true;
+    fiftyBtn.disabled = true;
+    revealBtn.disabled = true;
+    closeBtn.disabled = true;
+    pickBox.style.display = "none";
+    yesNoBox.style.display = "none";
+  }else{
+    mInput.disabled = false;
+    closeBtn.disabled = false;
+  }
+
+  // If spectator, stop here (don't render question/choices). We'll just show a waiting modal.
+  if(spectatorMode){
+    applyTheme(catIndex);
+    playSfx("open");
+    startTurnTimer();
+    backdrop.classList.add("show");
+    document.body.classList.add("modal-open");
+    try{ mInput.blur(); }catch(e){}
+    return;
+  }
+
+
 
   const isYesNo = isYesNoQ(q, catIndex);
   const isTwoPick = (CATEGORIES[catIndex].name === "Δύο παίκτες • Ποιος έχει περισσότερα;");
@@ -11911,8 +11952,15 @@ function setCurrentQuestion(catIndex, points, chosenIndex){
   state.current.fiftyUsed = false;
   fiftyOptions.style.display = "none";
   fiftyOptions.innerHTML = "";
+  // Always reset modal controls (important for online spectator mode)
   mInput.disabled = false;
-  document.getElementById("checkBtn").disabled = false;
+  mInput.placeholder = "Γράψε την απάντησή σου (ΕΛ ή EN)...";
+  checkBtn.disabled = false;
+  rerollBtn.disabled = false;
+  revealBtn.disabled = false;
+  closeBtn.disabled = false;
+  // fiftyBtn gets recalculated on next open; enable by default here
+  fiftyBtn.disabled = false;
   mAnswerBox.style.display = "none";
   mAnswerBox.innerHTML = "";
 
@@ -12234,8 +12282,15 @@ function finalizeAnswer(ok){
   // επαναφορά UI 50-50
   fiftyOptions.style.display = "none";
   fiftyOptions.innerHTML = "";
+  // Always reset modal controls (important for online spectator mode)
   mInput.disabled = false;
-  document.getElementById("checkBtn").disabled = false;
+  mInput.placeholder = "Γράψε την απάντησή σου (ΕΛ ή EN)...";
+  checkBtn.disabled = false;
+  rerollBtn.disabled = false;
+  revealBtn.disabled = false;
+  closeBtn.disabled = false;
+  // fiftyBtn gets recalculated on next open; enable by default here
+  fiftyBtn.disabled = false;
 
   // Έλεγχος "μαθηματικού" τέλους: αν κάποιος δεν μπορεί να κερδίσει
   if(checkMathematicalGameOver()) return;
@@ -12288,8 +12343,15 @@ function useFiftyFifty(){
 
   // ΔΕΝ κλειδώνουμε το input: ο παίκτης μπορεί είτε να διαλέξει από τα 2 κουμπιά
   // είτε να γράψει απάντηση και να πατήσει “Έλεγχος”.
+  // Always reset modal controls (important for online spectator mode)
   mInput.disabled = false;
-  document.getElementById("checkBtn").disabled = false;
+  mInput.placeholder = "Γράψε την απάντησή σου (ΕΛ ή EN)...";
+  checkBtn.disabled = false;
+  rerollBtn.disabled = false;
+  revealBtn.disabled = false;
+  closeBtn.disabled = false;
+  // fiftyBtn gets recalculated on next open; enable by default here
+  fiftyBtn.disabled = false;
 
   fiftyOptions.style.display = "block";
   fiftyOptions.innerHTML = `
@@ -12359,8 +12421,15 @@ function closeModal(force){
   fiftyOptions.innerHTML = "";
   mX2.style.display = "none";
   mX2.classList.remove("pulseGlow","popOnce");
+  // Always reset modal controls (important for online spectator mode)
   mInput.disabled = false;
-  document.getElementById("checkBtn").disabled = false;
+  mInput.placeholder = "Γράψε την απάντησή σου (ΕΛ ή EN)...";
+  checkBtn.disabled = false;
+  rerollBtn.disabled = false;
+  revealBtn.disabled = false;
+  closeBtn.disabled = false;
+  // fiftyBtn gets recalculated on next open; enable by default here
+  fiftyBtn.disabled = false;
   if(force) return;
   renderAll();
 }

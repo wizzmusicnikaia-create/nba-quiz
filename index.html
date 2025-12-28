@@ -255,7 +255,7 @@
 }
 
 /* Coin toss modal */
-#coinBackdrop{ z-index: 30000; }
+#coinBackdrop{ z-index: 50000; }
 #coinBackdrop .modal{ max-width: 640px; text-align:center; }
 .coinWrap{ display:flex; justify-content:center; margin:14px 0 10px; }
 .coin{
@@ -1467,11 +1467,8 @@ function initNewGameBase(){
 }
 
 function showCoinflipOverlayOnTop(){
-  // Ensure coinflip overlay is ALWAYS above the start screen (we raised startScreen z-index for click safety)
   const backdrop = document.getElementById("coinBackdrop");
-  if(backdrop){ backdrop.style.zIndex = "50000"; }
-  const start = document.getElementById("startScreen");
-  if(start){ start.style.zIndex = "1"; }
+  if(backdrop){ backdrop.style.zIndex = "20000"; }
 }
 
 function netApplyStart(payload){
@@ -1559,11 +1556,6 @@ function netFinalizeStartAfterLock(winnerName, lockedCat){
   const backdrop = document.getElementById("coinBackdrop");
   backdrop.classList.remove("show");
   document.body.classList.remove("modal-open");
-
-
-  // Restore start screen stacking (in case we return home without starting)
-  const start = document.getElementById("startScreen");
-  if(start){ start.style.zIndex = ""; }
 
   if(typeof lockedCat === "number"){
     toast("✅ Κλείδωμα κατηγορίας", `${winnerName} κλείδωσε: ${CATEGORIES[lockedCat].name}`, true);
@@ -1972,11 +1964,6 @@ function pickLockedCategory(winnerName){
       backdrop.classList.remove("show");
   document.body.classList.remove("modal-open");
     };
-
-    // restore start screen stacking
-    const start = document.getElementById("startScreen");
-    if(start){ start.style.zIndex = ""; }
-
 
     CATEGORIES.forEach((c, idx) => {
       const b = document.createElement("button");
@@ -11852,13 +11839,9 @@ function renderHeader(){
   x2p1.textContent = state.x2Left[1];
   x2p2.textContent = state.x2Left[2];
 
-  const isMyTurnOnline = (!NET.enabled) || (NET.player === state.turn);
-  const canArmX2 = isMyTurnOnline && !state.opponentBusy && (!state.current) && (state.x2Left[state.turn] > 0) && !state.x2Armed.active;
+  const canArmX2 = (!state.current) && (state.x2Left[state.turn] > 0) && !state.x2Armed.active;
   x2Btn.disabled = !canArmX2;
-  x2Btn\.classList\.toggle\("x2Armed", state\.x2Armed\.active\);
-  if(NET.enabled && (NET.player !== state.turn || state.opponentBusy)){
-    x2Btn.disabled = true;
-  }
+  x2Btn.classList.toggle("x2Armed", state.x2Armed.active);
   if(state.current && state.current.x2Active){
     x2Btn.textContent = "x2 🔥";
   }else{

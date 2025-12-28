@@ -212,23 +212,60 @@ body.modal-open #startScreen{
   align-items: center;
   justify-content: center;
   padding: 18px;
-  background: radial-gradient(900px 600px at 50% 0%, rgba(120,180,255,.18), transparent 60%),
-              rgba(0,0,0,.72);
+  background:
+    radial-gradient(900px 600px at 50% 0%, rgba(120,180,255,.18), transparent 60%),
+    rgba(0,0,0,.72);
   backdrop-filter: blur(10px);
 }
 #gameOver.show{ display:flex; }
+
 #gameOver .card{
-  width: min(720px, 100%);
+  width: min(760px, 100%);
   border-radius: 22px;
   border: 1px solid rgba(255,255,255,.12);
   background: linear-gradient(180deg, rgba(18,24,45,.92), rgba(10,14,30,.92));
   box-shadow: 0 30px 90px rgba(0,0,0,.55);
   padding: 18px;
 }
-#gameOver h2{ margin:0 0 8px; font-weight: 1000; letter-spacing:.2px; }
-#gameOver .sub{ opacity:.85; margin-bottom: 14px; }
+
+#gameOver .goHeader{
+  display:flex;
+  align-items:center;
+  gap:12px;
+  margin-bottom: 10px;
+}
+#gameOver .goBadge{
+  width: 54px;
+  height: 54px;
+  border-radius: 18px;
+  display:flex;
+  align-items:center;
+  justify-content:center;
+  font-size: 28px;
+  border: 1px solid rgba(255,255,255,.16);
+  background: rgba(255,255,255,.08);
+  box-shadow: inset 0 1px rgba(255,255,255,.10);
+}
+#gameOver .goHeadText h2{ margin:0 0 6px; font-weight: 1000; letter-spacing:.2px; }
+#gameOver .sub{ opacity:.85; }
+
+#gameOver .goWinnerRow{
+  margin: 10px 0 12px;
+  padding: 10px 12px;
+  border-radius: 16px;
+  border: 1px solid rgba(255,255,255,.12);
+  background: rgba(255,255,255,.06);
+}
+#gameOver .goWinnerText{
+  font-weight: 1000;
+  letter-spacing: .2px;
+  text-shadow: 0 2px 14px rgba(0,0,0,.45);
+}
+
 #gameOver .scoreline{
-  display:flex; gap: 12px; flex-wrap: wrap;
+  display:flex;
+  gap: 12px;
+  flex-wrap: wrap;
 }
 #gameOver .scorebox{
   flex:1;
@@ -237,12 +274,45 @@ body.modal-open #startScreen{
   border: 1px solid rgba(255,255,255,.10);
   background: rgba(255,255,255,.05);
   padding: 12px;
+  position: relative;
+  overflow: hidden;
 }
 #gameOver .scorebox .name{ font-weight: 950; opacity:.92; }
-#gameOver .scorebox .big{ font-size: 34px; font-weight: 1050; margin-top: 6px; }
-#gameOver .actions{ display:flex; gap: 10px; flex-wrap: wrap; margin-top: 14px; }
-#gameOver .actions .btn{ flex: 1; min-width: 200px; }
+#gameOver .scorebox .big{ font-size: 36px; font-weight: 1100; margin-top: 6px; }
 
+#gameOver .scorebox.win{
+  border-color: rgba(56,211,159,.45);
+  background: linear-gradient(180deg, rgba(56,211,159,.14), rgba(255,255,255,.05));
+}
+#gameOver .scorebox.win::after{
+  content:"🏆";
+  position:absolute;
+  right: 12px;
+  top: 10px;
+  font-size: 22px;
+  opacity: .95;
+}
+#gameOver .scorebox.lose{
+  opacity: .92;
+}
+#gameOver .scorebox.tie{
+  border-color: rgba(255,255,255,.18);
+}
+
+#gameOver .goMeta{
+  margin-top: 10px;
+  line-height: 1.35;
+  opacity: .9;
+  font-weight: 850;
+}
+
+#gameOver .actions{
+  display:flex;
+  gap: 10px;
+  flex-wrap: wrap;
+  margin-top: 14px;
+}
+#gameOver .actions .btn{ flex: 1; min-width: 200px; }
 
 /* Locked category styling */
 .cat.locked{
@@ -1082,28 +1152,43 @@ body{
   </div>
 
   <!-- Game UI overlays -->
-  
 
-  <div id="gameOver" role="dialog" aria-modal="true">
+    <div id="gameOver" role="dialog" aria-modal="true">
     <div class="card">
-      <h2 id="goTitle">Τέλος παιχνιδιού</h2>
-      <div class="sub" id="goSub"></div>
+      <div class="goHeader">
+        <div class="goBadge" id="goBadge" aria-hidden="true">🏆</div>
+        <div class="goHeadText">
+          <h2 id="goTitle">Τέλος παιχνιδιού</h2>
+          <div class="sub" id="goSub"></div>
+        </div>
+      </div>
+
+      <div class="goWinnerRow" id="goWinnerRow" style="display:none;">
+        <div class="goWinnerText" id="goWinnerText"></div>
+      </div>
+
       <div class="scoreline">
-        <div class="scorebox">
+        <div class="scorebox" id="goP1Box">
           <div class="name" id="goP1Name">Παίκτης 1</div>
           <div class="big" id="goP1Score">0</div>
         </div>
-        <div class="scorebox">
+        <div class="scorebox" id="goP2Box">
           <div class="name" id="goP2Name">Παίκτης 2</div>
           <div class="big" id="goP2Score">0</div>
         </div>
       </div>
+
+      <div class="goMeta muted small" id="goMeta"></div>
+
       <div class="actions">
-        <button class="btn primary" id="goNew">Νέο παιχνίδι</button>
+        <button class="btn primary" id="goRematch">Ρεβάνς</button>
+        <button class="btn secondary" id="goNew">Νέο παιχνίδι</button>
         <button class="btn secondary" id="goClose">Κλείσιμο</button>
       </div>
     </div>
   </div>
+
+</div>
 
 
 
@@ -11725,8 +11810,32 @@ function hideGameOver(){
   gameOverEl.classList.remove("show");
 }
 
+
 document.getElementById("goClose")?.addEventListener("click", hideGameOver);
 document.getElementById("goNew")?.addEventListener("click", returnToHome);
+
+// Rematch: start a new game with the same names.
+// Online: only the host can start (same as start button behavior).
+document.getElementById("goRematch")?.addEventListener("click", () => {
+  hideGameOver();
+  try{
+    // If online room is active, respect host authority.
+    if(window.NET && NET.enabled && !NET.isHost){
+      toast("Περιμένεις host", "Μόνο ο host μπορεί να ξεκινήσει ρεβάνς.", "bad");
+      return;
+    }
+
+    // Prefer the same behavior as pressing Start on the home screen.
+    const startBtn = document.getElementById("startBtn");
+    if(startBtn){ startBtn.click(); return; }
+
+    // Fallback (offline)
+    if(typeof startApp === "function"){ startApp(); }
+  }catch(e){
+    console.error(e);
+    if(typeof startApp === "function"){ startApp(); }
+  }
+});
 const board = document.getElementById("board");
 const s1 = document.getElementById("s1");
 const s2 = document.getElementById("s2");

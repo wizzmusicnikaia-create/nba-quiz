@@ -99,6 +99,12 @@
     }
     .backdrop.show{display:flex; pointer-events:auto}
     body.modal-open{overflow:hidden; touch-action:none}
+/* === FIX: when any modal is open, keep Start Screen behind & non-clickable === */
+body.modal-open #startScreen{
+  pointer-events: none !important;
+  z-index: 0 !important;
+}
+
     .modal{
       width:min(760px, 100%);
       background:var(--card);
@@ -255,7 +261,7 @@
 }
 
 /* Coin toss modal */
-#coinBackdrop{ z-index: 999999 !important; }
+#coinBackdrop{ z-index: 40000 !important; }
 #coinBackdrop .modal{ max-width: 640px; text-align:center; }
 .coinWrap{ display:flex; justify-content:center; margin:14px 0 10px; }
 .coin{
@@ -1468,7 +1474,7 @@ function initNewGameBase(){
 
 function showCoinflipOverlayOnTop(){
   const backdrop = document.getElementById("coinBackdrop");
-  if(backdrop){ backdrop.style.zIndex = "20000"; }
+  if(backdrop){ backdrop.style.zIndex = "40000"; }
 }
 
 function netApplyStart(payload){
@@ -1506,6 +1512,8 @@ function netApplyStart(payload){
   coin.textContent = "🏀";
   meta.textContent = "Γυρνάει το νόμισμα…";
   coin.classList.add("flipping");
+
+  backdrop.style.zIndex = "40000";
 
   backdrop.classList.add("show");
   document.body.classList.add("modal-open");

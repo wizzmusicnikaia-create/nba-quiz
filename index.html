@@ -3,7 +3,7 @@
 <head>
   <meta charset="utf-8" />
   <meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover" />
-  <title>NBA Quiz 2P 🏀</title>
+  <title>NBA Quiz 2P 🏀 vFIX-2025-12-28-3</title>
   <meta name="theme-color" content="#0b0b10" />
   <style>
     :root{
@@ -255,7 +255,6 @@
 
 /* Coin toss modal */
 #coinBackdrop{ z-index: 20000; }
-
 #coinBackdrop .modal{ max-width: 640px; text-align:center; }
 .coinWrap{ display:flex; justify-content:center; margin:14px 0 10px; }
 .coin{
@@ -442,12 +441,6 @@
       0 12px 30px rgba(0,0,0,.25);
   }
 }
-
-50%{ transform: translateZ(0) scale(1.03); filter: brightness(1.15); box-shadow: 0 0 6px rgba(47,116,255,.18), 0 14px 34px rgba(0,0,0,.30); }
-  100%{ transform: translateZ(0) scale(1); filter: brightness(1); box-shadow: 0 0 0 rgba(47,116,255,0), 0 12px 30px rgba(0,0,0,.25); }
-}
-
-
 
 /* ===== Bio (vertical teams + mini logos) ===== */
 .bioCard{
@@ -879,6 +872,11 @@ body{
   *{ animation-duration: .001ms !important; animation-iteration-count: 1 !important; transition-duration: .001ms !important; scroll-behavior: auto !important; }
 }
 
+
+/* === FIX: ensure start screen is clickable above any overlays === */
+#startScreen{ position:relative; z-index:20001; pointer-events:auto; }
+#startScreen *{ pointer-events:auto; }
+
 </style>
 </head>
 
@@ -1107,6 +1105,22 @@ body{
 <script src="https://www.gstatic.com/firebasejs/10.12.5/firebase-database-compat.js"></script>
 
 <script>
+// === BOOT DIAGNOSTICS vFIX-2025-12-28-3 ===
+window.__NBAQUIZ_VERSION__ = "vFIX-2025-12-28-3";
+window.addEventListener("error", (e) => {
+  try {
+    const ns = document.getElementById("netStatus");
+    if(ns) ns.textContent = "JS error: " + (e.message || e.type);
+  } catch(_e) {}
+});
+window.addEventListener("unhandledrejection", (e) => {
+  try {
+    const ns = document.getElementById("netStatus");
+    if(ns) ns.textContent = "Promise error: " + (e.reason?.message || e.reason);
+  } catch(_e) {}
+});
+
+
 
 /***************
  * OPTIONAL ONLINE MULTIPLAYER (Firebase Realtime DB)
@@ -1149,44 +1163,35 @@ function netStatus(txt){
 
 function netInit(){
   if(db) return;
-  // TODO: Fill this with your Firebase Web App config
+
+  // Firebase compat SDK is loaded via a script tag (firebase-app-compat.js).
+  // so we MUST initialize like this (no ES module imports).
   const firebaseConfig = {
-  // Import the functions you need from the SDKs you need
-import { initializeApp } from "firebase/app";
-// TODO: Add SDKs for Firebase products that you want to use
-// https://firebase.google.com/docs/web/setup#available-libraries
-
-// Your web app's Firebase configuration
-const firebaseConfig = {
-  apiKey: "AIzaSyCIfEcwniWNldPRHl0ybaMFS2TbEYxCK3c",
-  authDomain: "nbaquiz-b68b4.firebaseapp.com",
-  databaseURL: "https://nbaquiz-b68b4-default-rtdb.europe-west1.firebasedatabase.app",
-  projectId: "nbaquiz-b68b4",
-  storageBucket: "nbaquiz-b68b4.firebasestorage.app",
-  messagingSenderId: "914584655020",
-  appId: "1:914584655020:web:785dd29c52980fc9027b09"
-};
-
-// Initialize Firebase
-const app = initializeApp(firebaseConfig);
-    // apiKey: "...",
-    // authDomain: "...",
-    // databaseURL: "...",
-    // projectId: "...",
-    // storageBucket: "...",
-    // messagingSenderId: "...",
-    // appId: "..."
+    apiKey: "AIzaSyCIfEcwniWNldPRHl0ybaMFS2TbEYxCK3c",
+    authDomain: "nbaquiz-b68b4.firebaseapp.com",
+    databaseURL: "https://nbaquiz-b68b4-default-rtdb.europe-west1.firebasedatabase.app",
+    projectId: "nbaquiz-b68b4",
+    storageBucket: "nbaquiz-b68b4.firebasestorage.app",
+    messagingSenderId: "914584655020",
+    appId: "1:914584655020:web:785dd29c52980fc9027b09"
   };
+
   try{
     firebase.initializeApp(firebaseConfig);
     db = firebase.database();
+    NET.enabled = NET.enabled || false; // keep current
+    netStatus("Online ready");
   }catch(e){
-    console.warn("Firebase init failed (fill firebaseConfig).", e);
-    alert("Για online rooms πρέπει να συμπληρώσεις το firebaseConfig μέσα στο HTML.");
+    console.warn("Firebase init failed.", e);
+    // Do NOT break offline game if Firebase fails
     db = null;
     NET.enabled = false;
+    netStatus("Offline");
+    // Optional: comment out alert if you don't want popups
+    // alert("Για online rooms χρειάζεται σωστό firebaseConfig και hosting (όχι double-click file).");
   }
 }
+
 
 function makeRoomCode(len=6){
   const chars = "ABCDEFGHJKMNPQRSTUVWXYZ23456789";
@@ -1281,49 +1286,6 @@ function listenRoomActions(roomId){
   });
 }
 
-
-// --- Online sync helpers: coin toss + lock category ---
-let _netCoinResolve = null;
-let _netLockResolve = null;
-
-function waitForNetCoin(){
-  return new Promise(res => { _netCoinResolve = res; });
-}
-function waitForNetLock(){
-  return new Promise(res => { _netLockResolve = res; });
-}
-
-function showCoinBackdropWaiting(){
-  const backdrop = document.getElementById("coinBackdrop");
-  const coin = document.getElementById("coin");
-  const meta = document.getElementById("coinMeta");
-  const res = document.getElementById("coinResult");
-  const lockBox = document.getElementById("lockBox");
-  res.textContent = "";
-  res.className = "result";
-  lockBox.style.display = "none";
-  coin.textContent = "🏀";
-  coin.classList.add("flipping");
-  meta.textContent = "Περιμένεις τον host να ρίξει το νόμισμα…";
-  backdrop.classList.add("show");
-  document.body.classList.add("modal-open");
-}
-
-function paintCoinResult(winner, name1, name2){
-  const coin = document.getElementById("coin");
-  const meta = document.getElementById("coinMeta");
-  const res = document.getElementById("coinResult");
-  const lockBox = document.getElementById("lockBox");
-  const winnerNameEl = document.getElementById("coinWinnerName");
-  coin.classList.remove("flipping");
-  const finalName = (winner === 1) ? name1 : name2;
-  coin.textContent = finalName;
-  meta.textContent = "Σταμάτησε!";
-  res.textContent = `Νικητής νομίσματος: ${finalName}`;
-  res.className = "result ok";
-  winnerNameEl.textContent = finalName;
-  lockBox.style.display = "block";
-}
 function applyNetworkAction(a){
   switch(a.type){
     case "START_GAME": {
@@ -1334,38 +1296,62 @@ function applyNetworkAction(a){
       startApp();
       break;
     }
-
-    case "COIN_TOSS": {
-      if(a && (a.winner === 1 || a.winner === 2)){
-        const n1 = (document.getElementById("p1Name")?.value || "P1").trim() || "P1";
-        const n2 = (document.getElementById("p2Name")?.value || "P2").trim() || "P2";
-        state.coinWinner = a.winner;
-        paintCoinResult(a.winner, n1, n2);
-        if(_netCoinResolve){ _netCoinResolve(a.winner); _netCoinResolve = null; }
-      }
+    case "NET_START": {
+      netApplyStart(a);
       break;
     }
-    case "LOCK_CATEGORY": {
-      let locked = null;
-      if(a && typeof a.lockedCat === "number") locked = a.lockedCat;
-      state.lockedCat = locked;
-      const backdrop = document.getElementById("coinBackdrop");
-      backdrop?.classList.remove("show");
-      document.body.classList.remove("modal-open");
-      if(_netLockResolve){ _netLockResolve(locked); _netLockResolve = null; }
-      try{ renderBoard(); }catch(e){}
+    case "NET_LOCK": {
+      // Winner already finalized locally; others finalize on receiving this
+      const n1 = (document.getElementById("p1Name")?.value || "P1").trim() || "P1";
+      const n2 = (document.getElementById("p2Name")?.value || "P2").trim() || "P2";
+      const winner = a.coinWinner;
+      const winnerName = (winner === 1) ? n1 : n2;
+
+      state.lockedCat = (typeof a.lockedCat === "number") ? a.lockedCat : null;
+
+      // close coin modal and start game UI
+      netFinalizeStartAfterLock(winnerName, state.lockedCat);
       break;
     }
 
     case "OPEN_CELL":
-      openRandomQuestion(a.catIndex, a.points);
+      // Spectator mode: only the acting player sees the question
+      state.turn = a.from || state.turn;
+      if((a.from||0) === NET.player){
+        openRandomQuestion(a.catIndex, a.points);
+      }else{
+        state.opponentBusy = true;
+        state.pendingRemote = {catIndex:a.catIndex, points:a.points};
+        toast("⏳ Ο αντίπαλος απαντά…", "Περιμένεις να ολοκληρώσει την ερώτηση", "ok");
+        renderAll();
+      }
       break;
 
-    case "CHECK_ANSWER":
-      if(typeof a.guess === "string"){
-        mInput.value = a.guess;
+    case "ANSWER_RESULT": {
+      // Apply scored outcome without revealing the question
+      const catIndex = a.catIndex;
+      const points = a.points;
+      const baseIndex = a.baseIndex;
+      const cellKey = `${catIndex}|${points}`;
+      state.usedCells.add(cellKey);
+      if(typeof baseIndex === "number"){
+        state.usedQuestionIds.add(qId(catIndex, points, baseIndex));
       }
-      checkAnswer();
+      if(a.ok){
+        if(a.fromPlayer === 1) state.p1 += (a.awardPoints||0);
+        else if(a.fromPlayer === 2) state.p2 += (a.awardPoints||0);
+      }
+      if(typeof a.nextTurn === "number") state.turn = a.nextTurn;
+      state.opponentBusy = false;
+      state.pendingRemote = null;
+      renderAll();
+      break;
+    }
+
+    case "QUESTION_DONE":
+      state.opponentBusy = false;
+      state.pendingRemote = null;
+      renderAll();
       break;
 
     case "REVEAL":
@@ -1382,6 +1368,8 @@ function applyNetworkAction(a){
 
     case "CLOSE_MODAL":
       closeModal(false);
+      state.opponentBusy = false;
+      state.pendingRemote = null;
       break;
 
     case "SWAP_TURN":
@@ -1396,6 +1384,142 @@ function applyNetworkAction(a){
       break;
   }
 }
+
+// ---------- Online authoritative pre-game (coin flip + winner-only ban) ----------
+function initNewGameBase(){
+  setPlayerNames();
+  if(window.scoreAnim){ try{ scoreAnim.reset(); }catch(_e){} }
+
+  state.p1 = 0; state.p2 = 0;
+  state.turn = 1;
+  state.lifelines = {1:1, 2:1};
+  state.x2Left = {1:1, 2:1};
+  state.x2Armed = {active:false, owner:null};
+  state.streak = {1:0, 2:0};
+  state.lockedCat = null;
+  state.previewCat = null;
+  state.coinWinner = null;
+  state.opponentBusy = false;
+  state.pendingRemote = null;
+
+  state.usedCells = new Set();
+  state.usedQuestionIds = new Set();
+  state.seenByCell = {};
+  state.missingLastByTeam = {};
+  state.current = null;
+  state.checked = false;
+  state.gameEnded = false;
+
+  // Rebuild board questions for this game
+  CATEGORIES = buildGameCategories();
+  document.documentElement.style.setProperty("--cols", String(CATEGORIES.length));
+
+  renderAll();
+}
+
+function showCoinflipOverlayOnTop(){
+  const backdrop = document.getElementById("coinBackdrop");
+  if(backdrop){ backdrop.style.zIndex = "20000"; }
+}
+
+function netApplyStart(payload){
+  // seed + names
+  if(typeof payload.seed === "number") netSetSeed(payload.seed);
+  if(typeof payload.p1Name === "string") (document.getElementById("p1Name")||{}).value = payload.p1Name;
+  if(typeof payload.p2Name === "string") (document.getElementById("p2Name")||{}).value = payload.p2Name;
+
+  initNewGameBase();
+
+  const winner = payload.coinWinner;
+  state.coinWinner = winner;
+  // Loser starts first
+  state.turn = (winner === 1) ? 2 : 1;
+
+  // Show coin overlay above start UI
+  showCoinflipOverlayOnTop();
+  const backdrop = document.getElementById("coinBackdrop");
+  const coin = document.getElementById("coin");
+  const meta = document.getElementById("coinMeta");
+  const res = document.getElementById("coinResult");
+  const lockBox = document.getElementById("lockBox");
+  const winnerNameEl = document.getElementById("coinWinnerName");
+  const lockChoices = document.getElementById("lockChoices");
+  const lockSkipBtn = document.getElementById("lockSkipBtn");
+
+  const n1 = (document.getElementById("p1Name")?.value || "P1").trim() || "P1";
+  const n2 = (document.getElementById("p2Name")?.value || "P2").trim() || "P2";
+  const winnerName = (winner === 1) ? n1 : n2;
+
+  // Reset UI
+  res.textContent = "";
+  res.className = "result";
+  lockBox.style.display = "none";
+  coin.textContent = "🏀";
+  meta.textContent = "Γυρνάει το νόμισμα…";
+  coin.classList.add("flipping");
+
+  backdrop.classList.add("show");
+  document.body.classList.add("modal-open");
+
+  // quick flip animation then reveal winner
+  setTimeout(() => {
+    coin.classList.remove("flipping");
+    coin.textContent = winnerName;
+    meta.textContent = `Νικητής: ${winnerName}`;
+    res.className = "result ok";
+    res.textContent = `🏆 ${winnerName} κερδίζει το νόμισμα`;
+
+    // build lock choices
+    lockBox.style.display = "";
+    winnerNameEl.textContent = winnerName;
+    lockChoices.innerHTML = "";
+    for(let i=0;i<CATEGORIES.length;i++){
+      const b = document.createElement("button");
+      b.className = "catLockBtn";
+      b.textContent = CATEGORIES[i].name;
+      const canPick = (NET.player === winner);
+      if(!canPick) b.disabled = true;
+      b.addEventListener("click", () => {
+        if(!canPick) return;
+        state.lockedCat = i;
+        pushAction({ type:"NET_LOCK", lockedCat:i, coinWinner:winner });
+        netFinalizeStartAfterLock(winnerName, i);
+      });
+      lockChoices.appendChild(b);
+    }
+
+    const canSkip = (NET.player === winner);
+    lockSkipBtn.disabled = !canSkip;
+    lockSkipBtn.onclick = () => {
+      if(!canSkip) return;
+      state.lockedCat = null;
+      pushAction({ type:"NET_LOCK", lockedCat:null, coinWinner:winner });
+      netFinalizeStartAfterLock(winnerName, null);
+    };
+    if(NET.player !== winner){
+      meta.textContent = `Νικητής: ${winnerName} • Περιμένεις να κλειδώσει κατηγορία…`;
+    }
+  }, 700);
+}
+
+function netFinalizeStartAfterLock(winnerName, lockedCat){
+  // close coin modal
+  const backdrop = document.getElementById("coinBackdrop");
+  backdrop.classList.remove("show");
+  document.body.classList.remove("modal-open");
+
+  if(typeof lockedCat === "number"){
+    toast("✅ Κλείδωμα κατηγορίας", `${winnerName} κλείδωσε: ${CATEGORIES[lockedCat].name}`, true);
+  }else{
+    toast("ℹ️ Χωρίς κλείδωμα", `${winnerName} δεν κλείδωσε κατηγορία`, true);
+  }
+
+  document.getElementById("startScreen").style.display = "none";
+  document.getElementById("app").style.display = "";
+  window.dispatchEvent(new Event("resize"));
+  renderAll();
+}
+
 
 
 /* =========================
@@ -1651,43 +1775,14 @@ async function startApp(){
   const n2 = (document.getElementById("p2Name")?.value || "P2").trim() || "P2";
 
   try{
-    let winner = null;
-
-    if(NET.enabled){
-      if(NET.isHost){
-        // Host decides coin toss and broadcasts it
-        winner = await runCoinToss(n1, n2);
-        pushAction({ type: "COIN_TOSS", winner });
-      } else {
-        // Non-host waits for host's coin toss
-        showCoinBackdropWaiting();
-        winner = await waitForNetCoin();
-      }
-    } else {
-      winner = await runCoinToss(n1, n2);
-    }
-
+    const winner = await runCoinToss(n1, n2);
     state.coinWinner = winner;
 
     // Loser of coin flip starts first
     state.turn = (winner === 1) ? 2 : 1;
 
     const winnerName = (winner === 1) ? n1 : n2;
-
-    let locked = null;
-    if(NET.enabled){
-      if(NET.player === winner){
-        // Only winner chooses lock, then broadcast
-        locked = await pickLockedCategory(winnerName, winner);
-        pushAction({ type: "LOCK_CATEGORY", lockedCat: (typeof locked === "number") ? locked : null });
-      } else {
-        // Loser waits for winner's choice
-        locked = await waitForNetLock();
-      }
-    } else {
-      locked = await pickLockedCategory(winnerName, winner);
-    }
-
+    const locked = await pickLockedCategory(winnerName);
     state.lockedCat = (typeof locked === "number") ? locked : null;
 
     if(state.lockedCat !== null){
@@ -1709,6 +1804,7 @@ async function startApp(){
 }
 
 document.addEventListener("DOMContentLoaded", () => {
+  try{ netStatus("Ready • "+(window.__NBAQUIZ_VERSION__||"")); }catch(e){}
   const startBtn = document.getElementById("startBtn");
   const howBtn = document.getElementById("howBtn");
   const howBox = document.getElementById("howBox");
@@ -1721,9 +1817,20 @@ document.addEventListener("DOMContentLoaded", () => {
       // Shared seed so both devices generate the same random picks
       const seed = (Date.now() ^ (Math.random()*1e9)) >>> 0;
       netSetSeed(seed);
-      const p1Name = (document.getElementById("p1Name")?.value || "Παίκτης 1").trim();
-      const p2Name = (document.getElementById("p2Name")?.value || "Παίκτης 2").trim();
-      pushAction({ type:"START_GAME", seed, p1Name, p2Name });
+
+      const p1Name = (document.getElementById("p1Name")?.value || "P1").trim() || "P1";
+      const p2Name = (document.getElementById("p2Name")?.value || "P2").trim() || "P2";
+
+      // Host performs coin flip once and broadcasts winner (so both see the same)
+      const coinWinner = (Math.random() < 0.5) ? 1 : 2;
+
+      // Broadcast start + coin result
+      pushAction({ type:"NET_START", seed, p1Name, p2Name, coinWinner });
+
+      // Host also applies locally (self-actions are not replayed)
+      netApplyStart({ seed, p1Name, p2Name, coinWinner });
+
+      return;
     }
     startApp();
   });
@@ -1794,18 +1901,10 @@ function runCoinToss(name1, name2){
   });
 }
 
-function pickLockedCategory(winnerName, winnerPlayer){
+function pickLockedCategory(winnerName){
   const backdrop = document.getElementById("coinBackdrop");
   const choices = document.getElementById("lockChoices");
   const skipBtn = document.getElementById("lockSkipBtn");
-
-  const canChoose = (!NET.enabled) || (NET.player === winnerPlayer);
-  if(NET.enabled && !canChoose){
-    // Loser sees the options but cannot click; waits for winner's choice
-    skipBtn.disabled = true;
-    skipBtn.style.opacity = "0.5";
-    skipBtn.style.pointerEvents = "none";
-  }
 
   // Build category buttons fresh each time
   choices.innerHTML = "";
@@ -1822,13 +1921,7 @@ function pickLockedCategory(winnerName, winnerPlayer){
       b.className = "btn secondary";
       b.type = "button";
       b.textContent = c.name;
-      if(!canChoose){
-        b.disabled = true;
-        b.style.opacity = '0.5';
-        b.style.pointerEvents = 'none';
-      }
       b.onclick = () => {
-        if(!canChoose) return;
         cleanup();
         resolve(idx);
       };
@@ -1836,7 +1929,6 @@ function pickLockedCategory(winnerName, winnerPlayer){
     });
 
     skipBtn.onclick = () => {
-      if(!canChoose) return;
       cleanup();
       resolve(null);
     };
@@ -11333,6 +11425,8 @@ const state = {
 lockedCat: null,
   previewCat: null,
   coinWinner: null,
+  opponentBusy: false,
+  pendingRemote: null,
 
   // 1 ανά κελί: όταν απαντηθεί, κλειδώνει το κελί (όχι οι "ερωτήσεις" του base pool)
   usedCells: new Set(),
@@ -11829,7 +11923,12 @@ function renderBoardMobile(){
   }
 }
 function openRandomQuestion(catIndex, points){
-  if(NET.enabled && !NET.applyingRemote) pushAction({ type:"OPEN_CELL", catIndex, points });
+  // Online turn gate
+  if(NET.enabled && !NET.applyingRemote){
+    if(state.opponentBusy) { toast("⏳ Περίμενε", "Ο αντίπαλος απαντά…", "bad"); return; }
+    if(state.turn !== NET.player){ toast("⛔ Δεν είναι η σειρά σου", "Περίμενε τον αντίπαλο", "bad"); return; }
+    pushAction({ type:"OPEN_CELL", catIndex, points });
+  }
   if(state.gameEnded) return;
   const key = `${catIndex}|${points}`;
   if(state.usedCells.has(key)){
@@ -12436,9 +12535,8 @@ function checkAnswer(){
 
   const guess = mInput.value;
 
-  if(NET.enabled && !NET.applyingRemote){
-    pushAction({ type:"CHECK_ANSWER", guess });
-  }
+  // Online: do NOT broadcast the guess (spectator mode)
+  // We will broadcast only the result after scoring.
   if(!guess || !guess.trim()){
     alert("Γράψε μια απάντηση.");
     return;
@@ -12447,11 +12545,35 @@ function checkAnswer(){
   const { catIndex, points, qIndex, qObj } = state.current;
   const ok = includesAccepted(guess, qObj.answers);
 
+  // Apply locally
+  const beforeTurn = state.turn;
+  const baseIndex = state.current?.baseIndex;
+
   // Κλείνουμε 50-50 UI αν είναι ανοιχτό
   fiftyOptions.style.display = "none";
   fiftyOptions.innerHTML = "";
 
+  // Recompute awarded points deterministically (must match finalizeAnswer)
+  let awardPoints = state.current?.fiftyUsed ? 1 : points;
+  if(state.current?.x2Active) awardPoints *= 2;
+
   finalizeAnswer(ok);
+
+  // After finalizeAnswer, turn has already swapped
+  if(NET.enabled && !NET.applyingRemote){
+    pushAction({
+      type:"ANSWER_RESULT",
+      ok,
+      awardPoints,
+      fromPlayer: beforeTurn,
+      catIndex,
+      points,
+      baseIndex,
+      nextTurn: state.turn
+    });
+    // Also tell others to clear waiting state
+    pushAction({ type:"QUESTION_DONE" });
+  }
 }
 
 function closeModal(force){

@@ -3,7 +3,7 @@
 <head>
   <meta charset="utf-8" />
   <meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover" />
-  <title>NBA Quiz 2P 🏀</title>
+  <title>NBA Quiz 2P 🏀 vFIX-2025-12-28-3</title>
   <meta name="theme-color" content="#0b0b10" />
   <style>
     :root{
@@ -441,12 +441,6 @@
   }
 }
 
-50%{ transform: translateZ(0) scale(1.03); filter: brightness(1.15); box-shadow: 0 0 6px rgba(47,116,255,.18), 0 14px 34px rgba(0,0,0,.30); }
-  100%{ transform: translateZ(0) scale(1); filter: brightness(1); box-shadow: 0 0 0 rgba(47,116,255,0), 0 12px 30px rgba(0,0,0,.25); }
-}
-
-
-
 /* ===== Bio (vertical teams + mini logos) ===== */
 .bioCard{
     background: rgba(255,255,255,.06);
@@ -877,6 +871,11 @@ body{
   *{ animation-duration: .001ms !important; animation-iteration-count: 1 !important; transition-duration: .001ms !important; scroll-behavior: auto !important; }
 }
 
+
+/* === FIX: ensure start screen is clickable above any overlays === */
+#startScreen{ position:relative; z-index:20001; pointer-events:auto; }
+#startScreen *{ pointer-events:auto; }
+
 </style>
 </head>
 
@@ -1105,6 +1104,22 @@ body{
 <script src="https://www.gstatic.com/firebasejs/10.12.5/firebase-database-compat.js"></script>
 
 <script>
+// === BOOT DIAGNOSTICS vFIX-2025-12-28-3 ===
+window.__NBAQUIZ_VERSION__ = "vFIX-2025-12-28-3";
+window.addEventListener("error", (e) => {
+  try {
+    const ns = document.getElementById("netStatus");
+    if(ns) ns.textContent = "JS error: " + (e.message || e.type);
+  } catch(_e) {}
+});
+window.addEventListener("unhandledrejection", (e) => {
+  try {
+    const ns = document.getElementById("netStatus");
+    if(ns) ns.textContent = "Promise error: " + (e.reason?.message || e.reason);
+  } catch(_e) {}
+});
+
+
 
 /***************
  * OPTIONAL ONLINE MULTIPLAYER (Firebase Realtime DB)
@@ -1148,6 +1163,8 @@ function netStatus(txt){
 function netInit(){
   if(db) return;
 
+  // Firebase compat SDK is loaded via a script tag (firebase-app-compat.js).
+  // so we MUST initialize like this (no ES module imports).
   const firebaseConfig = {
     apiKey: "AIzaSyCIfEcwniWNldPRHl0ybaMFS2TbEYxCK3c",
     authDomain: "nbaquiz-b68b4.firebaseapp.com",
@@ -1161,13 +1178,19 @@ function netInit(){
   try{
     firebase.initializeApp(firebaseConfig);
     db = firebase.database();
+    NET.enabled = NET.enabled || false; // keep current
+    netStatus("Online ready");
   }catch(e){
     console.warn("Firebase init failed.", e);
-    alert("Online rooms: πρόβλημα αρχικοποίησης Firebase. Έλεγξε το firebaseConfig και ότι το link ανοίγει από https (GitHub Pages).");
+    // Do NOT break offline game if Firebase fails
     db = null;
     NET.enabled = false;
+    netStatus("Offline");
+    // Optional: comment out alert if you don't want popups
+    // alert("Για online rooms χρειάζεται σωστό firebaseConfig και hosting (όχι double-click file).");
   }
 }
+
 
 function makeRoomCode(len=6){
   const chars = "ABCDEFGHJKMNPQRSTUVWXYZ23456789";
@@ -1272,24 +1295,6 @@ function applyNetworkAction(a){
       startApp();
       break;
     }
-    case "COIN_TOSS": {
-      if(a.winner === 1 || a.winner === 2){
-        state.coinWinner = a.winner;
-      }
-      break;
-    }
-    case "LOCK_CATEGORY": {
-      state.lockDecisionMade = true;
-      if(typeof a.catIndex === "number"){
-        state.lockedCat = a.catIndex;
-      }else{
-        state.lockedCat = null;
-      }
-      state.previewCat = null;
-      renderBoard();
-      break;
-    }
-
     case "OPEN_CELL":
       openRandomQuestion(a.catIndex, a.points);
       break;
@@ -1584,48 +1589,14 @@ async function startApp(){
   const n2 = (document.getElementById("p2Name")?.value || "P2").trim() || "P2";
 
   try{
-    // Reset sync flags each new game
-    state.coinWinner = null;
-    state.lockedCat = null;
-    state.lockDecisionMade = false;
-
-    let winner = null;
-
-    if(NET.enabled){
-      // Host decides coin winner once, broadcasts to everyone
-      if(NET.isHost){
-        winner = (Math.random() < 0.5) ? 1 : 2;
-        emitAction({ type: "COIN_TOSS", winner });
-      }
-      // Everyone waits until COIN_TOSS arrives (host included, already set)
-      winner = await waitForCoinWinner();
-      await runCoinToss(n1, n2, winner);
-    }else{
-      winner = await runCoinToss(n1, n2);
-      state.coinWinner = winner;
-    }
+    const winner = await runCoinToss(n1, n2);
+    state.coinWinner = winner;
 
     // Loser of coin flip starts first
     state.turn = (winner === 1) ? 2 : 1;
 
     const winnerName = (winner === 1) ? n1 : n2;
-
-    // Category lock: only coin winner can choose in online mode
-    let locked = null;
-    if(NET.enabled){
-      const iAmWinner = (NET.player === winner);
-      locked = await pickLockedCategory(winnerName, iAmWinner);
-
-      if(iAmWinner){
-        emitAction({ type: "LOCK_CATEGORY", catIndex: locked });
-      }else{
-        // Waiter inside pickLockedCategory resolves when LOCK_CATEGORY arrives
-      }
-    }else{
-      locked = await pickLockedCategory(winnerName, true);
-      state.lockDecisionMade = true;
-    }
-
+    const locked = await pickLockedCategory(winnerName);
     state.lockedCat = (typeof locked === "number") ? locked : null;
 
     if(state.lockedCat !== null){
@@ -1637,7 +1608,6 @@ async function startApp(){
     // If something goes wrong, proceed without lock
     state.coinWinner = null;
     state.lockedCat = null;
-    state.lockDecisionMade = true;
     state.previewCat = null;
   }
 
@@ -1648,6 +1618,7 @@ async function startApp(){
 }
 
 document.addEventListener("DOMContentLoaded", () => {
+  try{ netStatus("Ready • "+(window.__NBAQUIZ_VERSION__||"")); }catch(e){}
   const startBtn = document.getElementById("startBtn");
   const howBtn = document.getElementById("howBtn");
   const howBox = document.getElementById("howBox");
@@ -1686,7 +1657,7 @@ document.addEventListener("DOMContentLoaded", () => {
 /* =========================
    Pre-game: coin toss + category lock
    ========================= */
-function runCoinToss(name1, name2, forcedWinner=null){
+function runCoinToss(name1, name2){
   const backdrop = document.getElementById("coinBackdrop");
   const coin = document.getElementById("coin");
   const meta = document.getElementById("coinMeta");
@@ -1706,7 +1677,7 @@ function runCoinToss(name1, name2, forcedWinner=null){
   document.body.classList.add("modal-open");
 
   return new Promise(resolve => {
-    const winner = (forcedWinner === 1 || forcedWinner === 2) ? forcedWinner : ((Math.random() < 0.5) ? 1 : 2);
+    const winner = (Math.random() < 0.5) ? 1 : 2;
 
     // While flipping, alternate label quickly for effect
     let t = 0;
@@ -1733,7 +1704,7 @@ function runCoinToss(name1, name2, forcedWinner=null){
   });
 }
 
-function pickLockedCategory(winnerName, allowPick=true){
+function pickLockedCategory(winnerName){
   const backdrop = document.getElementById("coinBackdrop");
   const choices = document.getElementById("lockChoices");
   const skipBtn = document.getElementById("lockSkipBtn");
@@ -1741,35 +1712,12 @@ function pickLockedCategory(winnerName, allowPick=true){
   // Build category buttons fresh each time
   choices.innerHTML = "";
 
-  // Helper: close modal
-  const cleanup = () => {
-    skipBtn.onclick = null;
-    backdrop.classList.remove("show");
-    document.body.classList.remove("modal-open");
-  };
-
   return new Promise(resolve => {
-    // Winner can pick; everyone else waits for network decision
-    if(!allowPick){
-      // Show disabled buttons (visual only)
-      CATEGORIES.forEach((c) => {
-        const b = document.createElement("button");
-        b.className = "btn secondary";
-        b.type = "button";
-        b.textContent = c.name;
-        b.disabled = true;
-        choices.appendChild(b);
-      });
-      skipBtn.disabled = true;
-      // Wait until LOCK_CATEGORY arrives
-      waitForLockDecision().then((idx)=>{
-        cleanup();
-        resolve(idx);
-      });
-      return;
-    }
-
-    skipBtn.disabled = false;
+    const cleanup = () => {
+      skipBtn.onclick = null;
+      backdrop.classList.remove("show");
+  document.body.classList.remove("modal-open");
+    };
 
     CATEGORIES.forEach((c, idx) => {
       const b = document.createElement("button");
@@ -11294,44 +11242,6 @@ lockedCat: null,
   checked: false
 };
 
-// Online turn gating helpers
-function canActNow(){
-  // Remote-applied actions must always go through
-  if(NET.enabled && NET.applyingRemote) return true;
-  if(!NET.enabled) return true;
-  return state.turn === NET.player;
-}
-function emitAction(a){
-  // Apply locally and broadcast (host + clients). This keeps both sides consistent.
-  if(NET.enabled && !NET.applyingRemote) pushAction(a);
-  // Apply locally without re-broadcast
-  const prev = NET.applyingRemote;
-  NET.applyingRemote = true;
-  try{ applyNetworkAction({ ...a, from: NET.player || 0 }); }
-  finally{ NET.applyingRemote = prev; }
-}
-
-// Wait helpers used in online pre-game sync
-function waitForCoinWinner(){
-  return new Promise(resolve=>{
-    const id = setInterval(()=>{
-      if(state.coinWinner === 1 || state.coinWinner === 2){
-        clearInterval(id); resolve(state.coinWinner);
-      }
-    }, 30);
-  });
-}
-function waitForLockDecision(){
-  return new Promise(resolve=>{
-    const id = setInterval(()=>{
-      if(state.lockDecisionMade){
-        clearInterval(id); resolve(state.lockedCat);
-      }
-    }, 30);
-  });
-}
-
-
 
 /* =========================
    Game-like feedback (SFX, toasts, timer, themes)
@@ -11703,10 +11613,6 @@ function renderHeader(){
 
 
 function toggleCategoryPreview(c){
-  if(!canActNow()){
-    toast("⛔ Όχι ακόμα", "Δεν είναι η σειρά σου", "bad");
-    return;
-  }
   // Επιλογή κατηγορίας για να εμφανιστούν οι δυσκολίες της.
   // Δεν κάνουμε "snap" στην κλειδωμένη κατηγορία: οι άλλες κατηγορίες πρέπει να παραμένουν διαθέσιμες.
   state.previewCat = (state.previewCat === c) ? null : c;
@@ -11818,10 +11724,6 @@ function renderBoardMobile(){
   }
 }
 function openRandomQuestion(catIndex, points){
-  if(NET.enabled && !NET.applyingRemote && state.turn !== NET.player){
-    toast("⛔ Όχι ακόμα", "Δεν είναι η σειρά σου", "bad");
-    return;
-  }
   if(NET.enabled && !NET.applyingRemote) pushAction({ type:"OPEN_CELL", catIndex, points });
   if(state.gameEnded) return;
   const key = `${catIndex}|${points}`;

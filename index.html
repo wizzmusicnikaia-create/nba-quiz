@@ -1121,22 +1121,6 @@ const NET = {
   seed: null
 };
 
-
-function isMyTurn(){
-  // Offline: always allow
-  if(!NET.enabled) return true;
-  // When applying remote actions, we must apply regardless of local turn
-  if(NET.applyingRemote) return true;
-  // If player role not set yet, don't block
-  if(!NET.player) return true;
-  return state && state.turn === NET.player;
-}
-function requireMyTurn(){
-  if(isMyTurn()) return true;
-  toast("⛔ Δεν είναι η σειρά σου", "Παίζει ο άλλος παίκτης τώρα.", "bad");
-  return false;
-}
-
 let _origMathRandom = null;
 let db = null;
 
@@ -1305,6 +1289,24 @@ function applyNetworkAction(a){
       startApp();
       break;
     }
+    case "COIN_TOSS": {
+      if(a.winner === 1 || a.winner === 2){
+        state.coinWinner = a.winner;
+      }
+      break;
+    }
+    case "LOCK_CATEGORY": {
+      state.lockDecisionMade = true;
+      if(typeof a.catIndex === "number"){
+        state.lockedCat = a.catIndex;
+      }else{
+        state.lockedCat = null;
+      }
+      state.previewCat = null;
+      renderBoard();
+      break;
+    }
+
     case "OPEN_CELL":
       openRandomQuestion(a.catIndex, a.points);
       break;
@@ -1336,25 +1338,6 @@ function applyNetworkAction(a){
       // Trigger same behavior as local swap
       state.turn = state.turn === 1 ? 2 : 1;
       renderHeader();
-      break;
-
-    case "SET_LOCK":
-      state.lockedCat = (typeof a.lockedCat === "number") ? a.lockedCat : null;
-
-      // Inform both devices
-      try{
-        const n1 = (document.getElementById("p1Name")||{}).value || "P1";
-        const n2 = (document.getElementById("p2Name")||{}).value || "P2";
-        const winnerName = (a.winner === 1) ? n1 : n2;
-
-        if(state.lockedCat !== null){
-          toast("✅ Κλείδωμα κατηγορίας", `${winnerName} κλείδωσε: ${CATEGORIES[state.lockedCat].name}`, "ok");
-        }else{
-          toast("ℹ️ Χωρίς κλείδωμα", `${winnerName} δεν κλείδωσε κατηγορία`, "ok");
-        }
-      }catch(_){}
-
-      renderAll();
       break;
 
     case "ARM_X2":
@@ -1618,16 +1601,48 @@ async function startApp(){
   const n2 = (document.getElementById("p2Name")?.value || "P2").trim() || "P2";
 
   try{
-    const winner = await runCoinToss(n1, n2);
-    state.coinWinner = winner;
+    // Reset sync flags each new game
+    state.coinWinner = null;
+    state.lockedCat = null;
+    state.lockDecisionMade = false;
+
+    let winner = null;
+
+    if(NET.enabled){
+      // Host decides coin winner once, broadcasts to everyone
+      if(NET.isHost){
+        winner = (Math.random() < 0.5) ? 1 : 2;
+        emitAction({ type: "COIN_TOSS", winner });
+      }
+      // Everyone waits until COIN_TOSS arrives (host included, already set)
+      winner = await waitForCoinWinner();
+      await runCoinToss(n1, n2, winner);
+    }else{
+      winner = await runCoinToss(n1, n2);
+      state.coinWinner = winner;
+    }
 
     // Loser of coin flip starts first
     state.turn = (winner === 1) ? 2 : 1;
 
     const winnerName = (winner === 1) ? n1 : n2;
-    const locked = await pickLockedCategory(winnerName, winner);
-    // Sync locked category to the other device
-    if(NET.enabled && !NET.applyingRemote) pushAction({type:"SET_LOCK", lockedCat: (typeof locked === "number") ? locked : null, winner});
+
+    // Category lock: only coin winner can choose in online mode
+    let locked = null;
+    if(NET.enabled){
+      const iAmWinner = (NET.player === winner);
+      locked = await pickLockedCategory(winnerName, iAmWinner);
+
+      if(iAmWinner){
+        emitAction({ type: "LOCK_CATEGORY", catIndex: locked });
+      }else{
+        // Waiter inside pickLockedCategory resolves when LOCK_CATEGORY arrives
+      }
+    }else{
+      locked = await pickLockedCategory(winnerName, true);
+      state.lockDecisionMade = true;
+    }
+
     state.lockedCat = (typeof locked === "number") ? locked : null;
 
     if(state.lockedCat !== null){
@@ -1639,8 +1654,10 @@ async function startApp(){
     // If something goes wrong, proceed without lock
     state.coinWinner = null;
     state.lockedCat = null;
+    state.lockDecisionMade = true;
     state.previewCat = null;
   }
+}
 
   document.getElementById("startScreen").style.display = "none";
   document.getElementById("app").style.display = "";
@@ -1687,7 +1704,7 @@ document.addEventListener("DOMContentLoaded", () => {
 /* =========================
    Pre-game: coin toss + category lock
    ========================= */
-function runCoinToss(name1, name2){
+function runCoinToss(name1, name2, forcedWinner=null){
   const backdrop = document.getElementById("coinBackdrop");
   const coin = document.getElementById("coin");
   const meta = document.getElementById("coinMeta");
@@ -1707,7 +1724,7 @@ function runCoinToss(name1, name2){
   document.body.classList.add("modal-open");
 
   return new Promise(resolve => {
-    const winner = (Math.random() < 0.5) ? 1 : 2;
+    const winner = (forcedWinner === 1 || forcedWinner === 2) ? forcedWinner : ((Math.random() < 0.5) ? 1 : 2);
 
     // While flipping, alternate label quickly for effect
     let t = 0;
@@ -1734,7 +1751,7 @@ function runCoinToss(name1, name2){
   });
 }
 
-function pickLockedCategory(winnerName, winnerPlayer){
+function pickLockedCategory(winnerName, allowPick=true){
   const backdrop = document.getElementById("coinBackdrop");
   const choices = document.getElementById("lockChoices");
   const skipBtn = document.getElementById("lockSkipBtn");
@@ -1742,19 +1759,35 @@ function pickLockedCategory(winnerName, winnerPlayer){
   // Build category buttons fresh each time
   choices.innerHTML = "";
 
-  const canPick = (!NET.enabled) || (NET.player === winnerPlayer);
-  if(NET.enabled && !canPick){
-    // Loser: show info and disable buttons
-    const lockBox = document.getElementById("lockBox");
-    if(lockBox) lockBox.querySelector(".muted")?.insertAdjacentHTML("beforeend", `<div style="margin-top:8px; opacity:.9;">⏳ Περιμένεις… Μόνο ο νικητής του νομίσματος επιλέγει κλείδωμα.</div>`);
-  }
+  // Helper: close modal
+  const cleanup = () => {
+    skipBtn.onclick = null;
+    backdrop.classList.remove("show");
+    document.body.classList.remove("modal-open");
+  };
 
   return new Promise(resolve => {
-    const cleanup = () => {
-      skipBtn.onclick = null;
-      backdrop.classList.remove("show");
-  document.body.classList.remove("modal-open");
-    };
+    // Winner can pick; everyone else waits for network decision
+    if(!allowPick){
+      // Show disabled buttons (visual only)
+      CATEGORIES.forEach((c) => {
+        const b = document.createElement("button");
+        b.className = "btn secondary";
+        b.type = "button";
+        b.textContent = c.name;
+        b.disabled = true;
+        choices.appendChild(b);
+      });
+      skipBtn.disabled = true;
+      // Wait until LOCK_CATEGORY arrives
+      waitForLockDecision().then((idx)=>{
+        cleanup();
+        resolve(idx);
+      });
+      return;
+    }
+
+    skipBtn.disabled = false;
 
     CATEGORIES.forEach((c, idx) => {
       const b = document.createElement("button");
@@ -1765,26 +1798,13 @@ function pickLockedCategory(winnerName, winnerPlayer){
         cleanup();
         resolve(idx);
       };
-      if(!canPick){
-        b.disabled = true;
-        b.style.opacity = ".55";
-        b.style.cursor = "not-allowed";
-        b.onclick = null;
-      }
       choices.appendChild(b);
     });
 
-    if(!canPick){
-      skipBtn.disabled = true;
-      skipBtn.style.opacity = ".55";
-      skipBtn.style.cursor = "not-allowed";
-      skipBtn.onclick = null;
-    }else{
-      skipBtn.onclick = () => {
-        cleanup();
-        resolve(null);
-      };
-    }
+    skipBtn.onclick = () => {
+      cleanup();
+      resolve(null);
+    };
   });
 }
 
@@ -11292,6 +11312,44 @@ lockedCat: null,
   checked: false
 };
 
+// Online turn gating helpers
+function canActNow(){
+  // Remote-applied actions must always go through
+  if(NET.enabled && NET.applyingRemote) return true;
+  if(!NET.enabled) return true;
+  return state.turn === NET.player;
+}
+function emitAction(a){
+  // Apply locally and broadcast (host + clients). This keeps both sides consistent.
+  if(NET.enabled && !NET.applyingRemote) pushAction(a);
+  // Apply locally without re-broadcast
+  const prev = NET.applyingRemote;
+  NET.applyingRemote = true;
+  try{ applyNetworkAction({ ...a, from: NET.player || 0 }); }
+  finally{ NET.applyingRemote = prev; }
+}
+
+// Wait helpers used in online pre-game sync
+function waitForCoinWinner(){
+  return new Promise(resolve=>{
+    const id = setInterval(()=>{
+      if(state.coinWinner === 1 || state.coinWinner === 2){
+        clearInterval(id); resolve(state.coinWinner);
+      }
+    }, 30);
+  });
+}
+function waitForLockDecision(){
+  return new Promise(resolve=>{
+    const id = setInterval(()=>{
+      if(state.lockDecisionMade){
+        clearInterval(id); resolve(state.lockedCat);
+      }
+    }, 30);
+  });
+}
+
+
 
 /* =========================
    Game-like feedback (SFX, toasts, timer, themes)
@@ -11561,15 +11619,13 @@ function extractTwoPickOptions(prompt){
 
 
 document.getElementById("swapBtn").addEventListener("click", () => {
-  if(!requireMyTurn()) return;
-if(NET.enabled && !NET.applyingRemote) pushAction({ type:"SWAP_TURN" });
+  if(NET.enabled && !NET.applyingRemote) pushAction({ type:"SWAP_TURN" });
   state.turn = state.turn === 1 ? 2 : 1;
   renderHeader();
 });
 
 document.getElementById("x2Btn").addEventListener("click", () => {
-  if(!requireMyTurn()) return;
-if(state.current){
+  if(state.current){
     toast("⛔ x2", "Το x2 πρέπει να ενεργοποιηθεί πριν ανοίξεις ερώτηση", "bad");
     return;
   }
@@ -11589,9 +11645,7 @@ document.getElementById("closeBtn").addEventListener("click", () => { if(NET.ena
 document.getElementById("revealBtn").addEventListener("click", () => { if(NET.enabled && !NET.applyingRemote) pushAction({type:"REVEAL"}); revealAnswer(); });
 document.getElementById("checkBtn").addEventListener("click", () => { /* push happens inside checkAnswer (with guess) */ checkAnswer(); });
 document.getElementById("rerollBtn").addEventListener("click", () => { if(NET.enabled && !NET.applyingRemote) pushAction({type:"REROLL"}); rerollQuestion(); });
-fiftyBtn.addEventListener("click", () => {
-  if(!requireMyTurn()) return;
-if(NET.enabled && !NET.applyingRemote) pushAction({type:"FIFTY"}); useFiftyFifty(); });
+fiftyBtn.addEventListener("click", () => { if(NET.enabled && !NET.applyingRemote) pushAction({type:"FIFTY"}); useFiftyFifty(); });
 backdrop.addEventListener("click", (e) => { /* click outside: do nothing */ });
 
 function qId(catIndex, points, baseIndex){
@@ -11667,6 +11721,10 @@ function renderHeader(){
 
 
 function toggleCategoryPreview(c){
+  if(!canActNow()){
+    toast("⛔ Όχι ακόμα", "Δεν είναι η σειρά σου", "bad");
+    return;
+  }
   // Επιλογή κατηγορίας για να εμφανιστούν οι δυσκολίες της.
   // Δεν κάνουμε "snap" στην κλειδωμένη κατηγορία: οι άλλες κατηγορίες πρέπει να παραμένουν διαθέσιμες.
   state.previewCat = (state.previewCat === c) ? null : c;
@@ -11778,8 +11836,10 @@ function renderBoardMobile(){
   }
 }
 function openRandomQuestion(catIndex, points){
-  if(!requireMyTurn()) return;
-
+  if(NET.enabled && !NET.applyingRemote && state.turn !== NET.player){
+    toast("⛔ Όχι ακόμα", "Δεν είναι η σειρά σου", "bad");
+    return;
+  }
   if(NET.enabled && !NET.applyingRemote) pushAction({ type:"OPEN_CELL", catIndex, points });
   if(state.gameEnded) return;
   const key = `${catIndex}|${points}`;
@@ -12381,8 +12441,6 @@ function revealAnswer(){
 }
 
 function checkAnswer(){
-  if(!requireMyTurn()) return;
-
   if(state.gameEnded) return;
   if(!state.current) return;
   if(state.checked) return;

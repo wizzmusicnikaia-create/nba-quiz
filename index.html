@@ -1467,8 +1467,11 @@ function initNewGameBase(){
 }
 
 function showCoinflipOverlayOnTop(){
+  // Ensure coinflip overlay is ALWAYS above the start screen (we raised startScreen z-index for click safety)
   const backdrop = document.getElementById("coinBackdrop");
-  if(backdrop){ backdrop.style.zIndex = "20000"; }
+  if(backdrop){ backdrop.style.zIndex = "50000"; }
+  const start = document.getElementById("startScreen");
+  if(start){ start.style.zIndex = "1"; }
 }
 
 function netApplyStart(payload){
@@ -1556,6 +1559,11 @@ function netFinalizeStartAfterLock(winnerName, lockedCat){
   const backdrop = document.getElementById("coinBackdrop");
   backdrop.classList.remove("show");
   document.body.classList.remove("modal-open");
+
+
+  // Restore start screen stacking (in case we return home without starting)
+  const start = document.getElementById("startScreen");
+  if(start){ start.style.zIndex = ""; }
 
   if(typeof lockedCat === "number"){
     toast("✅ Κλείδωμα κατηγορίας", `${winnerName} κλείδωσε: ${CATEGORIES[lockedCat].name}`, true);
@@ -1964,6 +1972,11 @@ function pickLockedCategory(winnerName){
       backdrop.classList.remove("show");
   document.body.classList.remove("modal-open");
     };
+
+    // restore start screen stacking
+    const start = document.getElementById("startScreen");
+    if(start){ start.style.zIndex = ""; }
+
 
     CATEGORIES.forEach((c, idx) => {
       const b = document.createElement("button");

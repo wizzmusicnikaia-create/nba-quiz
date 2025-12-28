@@ -207,7 +207,7 @@ body.modal-open #startScreen{
 #gameOver{
   position: fixed;
   inset: 0;
-  z-index: 9998;
+  z-index: 20050;
   display: none;
   align-items: center;
   justify-content: center;
@@ -11790,7 +11790,14 @@ function startTurnTimer(){
 }
 
 function showGameOver(){
-  playSfx("end");
+
+  // Ensure any question modal/backdrop is closed before showing the winner screen
+  try{ closeModal(true); }catch(e){}
+  try{
+    document.getElementById("backdrop")?.classList.remove("show");
+    document.body.classList.remove("modal-open");
+  }catch(e){}
+playSfx("end");
   const { n1, n2 } = getPlayerNames();
   const winner =
     state.p1 === state.p2 ? "Ισοπαλία!" :
@@ -11803,7 +11810,7 @@ function showGameOver(){
   goP1Score.textContent = String(state.p1);
   goP2Score.textContent = String(state.p2);
 
-  gameOverEl.classList.add("show");
+    gameOverEl.classList.add("show");
 }
 
 function hideGameOver(){

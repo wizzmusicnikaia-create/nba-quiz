@@ -1339,6 +1339,35 @@ function listenRoomActions(roomId){
       NET.applyingRemote = false;
     }
   });
+  ensureNetWatchdog();
+}
+
+
+function ensureNetWatchdog(){
+  if(ui.netWatchdogId) return;
+  ui.netWatchdogId = setInterval(() => {
+    if(!NET.enabled){
+      clearInterval(ui.netWatchdogId);
+      ui.netWatchdogId = null;
+      return;
+    }
+    if(state.opponentBusy && state.opponentBusySince){
+      const elapsed = Date.now() - state.opponentBusySince;
+      if(elapsed > 90000){ // 90s safety unlock
+        state.opponentBusy = false;
+        state.pendingRemote = null;
+        state.opponentBusySince = 0;
+        // Give control back to the local player to avoid deadlock if opponent disconnected mid-question
+        state.turn = NET.player;
+        if(NET.enabled && !NET.applyingRemote){
+          pushAction({ type:"SET_TURN", turn: NET.player });
+          pushAction({ type:"QUESTION_DONE" });
+        }
+        toast("🔓 Sync", "Ξεκλειδώθηκε μετά από αναμονή (πιθανή αποσύνδεση αντιπάλου).", "ok");
+        renderAll();
+      }
+    }
+  }, 3000);
 }
 
 function applyNetworkAction(a){
@@ -1377,6 +1406,7 @@ function applyNetworkAction(a){
       }else{
         state.opponentBusy = true;
         state.pendingRemote = {catIndex:a.catIndex, points:a.points};
+        state.opponentBusySince = Date.now();
         toast("⏳ Ο αντίπαλος απαντά…", "Περιμένεις να ολοκληρώσει την ερώτηση", "ok");
         renderAll();
       }
@@ -1399,6 +1429,7 @@ function applyNetworkAction(a){
       if(typeof a.nextTurn === "number") state.turn = a.nextTurn;
       state.opponentBusy = false;
       state.pendingRemote = null;
+  state.opponentBusySince = 0;
       renderAll();
       break;
     }
@@ -1406,8 +1437,10 @@ function applyNetworkAction(a){
     case "QUESTION_DONE":
       state.opponentBusy = false;
       state.pendingRemote = null;
+      state.opponentBusySince = 0;
       renderAll();
-      break;
+            state.opponentBusySince = 0;
+break;
 
     case "REVEAL":
       revealAnswer();
@@ -1425,6 +1458,7 @@ function applyNetworkAction(a){
       closeModal(false);
       state.opponentBusy = false;
       state.pendingRemote = null;
+      state.opponentBusySince = 0;
       break;
 
     case "SWAP_TURN":
@@ -1432,6 +1466,15 @@ function applyNetworkAction(a){
       state.turn = state.turn === 1 ? 2 : 1;
       renderHeader();
       break;
+    case "SET_TURN":
+      if(typeof a.turn === "number") state.turn = a.turn;
+      state.opponentBusy = false;
+      state.pendingRemote = null;
+      state.opponentBusySince = 0;
+      renderAll();
+      break;
+
+
 
     case "ARM_X2":
       // Simulate tap
@@ -11507,7 +11550,9 @@ const ui = {
   timerSec: 90,
   timerLeft: 0,
   timerId: null,
-  timerStartAt: 0
+  timerStartAt: 0,
+  netWatchdogId: null
+
 };
 
 const toastsEl = document.getElementById("toasts");
@@ -11982,7 +12027,20 @@ function renderBoardMobile(){
 function openRandomQuestion(catIndex, points){
   // Online turn gate
   if(NET.enabled && !NET.applyingRemote){
-    if(state.opponentBusy) { toast("⏳ Περίμενε", "Ο αντίπαλος απαντά…", "bad"); return; }
+    if(state.opponentBusy){
+      const elapsed = state.opponentBusySince ? (Date.now() - state.opponentBusySince) : 0;
+      if(elapsed > 90000){
+        state.opponentBusy = false;
+        state.pendingRemote = null;
+        state.opponentBusySince = 0;
+        if(NET.enabled && !NET.applyingRemote){
+          pushAction({ type:"SET_TURN", turn: NET.player });
+          pushAction({ type:"QUESTION_DONE" });
+        }
+      }else{
+        toast("⏳ Περίμενε", "Ο αντίπαλος απαντά…", "bad"); return;
+      }
+    }
     if(state.turn !== NET.player){ toast("⛔ Δεν είναι η σειρά σου", "Περίμενε τον αντίπαλο", "bad"); return; }
     pushAction({ type:"OPEN_CELL", catIndex, points });
   }

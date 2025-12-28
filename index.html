@@ -13238,5 +13238,46 @@ document.addEventListener('DOMContentLoaded', () => {
 })();
 </script>
 
+
+<!-- ===== ONLINE WINNER SCREEN ===== -->
+<div id="onlineWin" class="endOverlay win">
+  <div class="endCard">
+    <h1>🏆 ΝΙΚΗ!</h1>
+    <p id="onlineWinText"></p>
+    <button onclick="location.reload()">Νέο παιχνίδι</button>
+  </div>
+</div>
+
+<style>
+.endOverlay{position:fixed;inset:0;display:none;z-index:65000;background:rgba(0,0,0,.85);align-items:center;justify-content:center}
+.endOverlay.show{display:flex}
+.endCard{background:#111;color:#fff;padding:30px;border-radius:20px;text-align:center}
+.endOverlay.win .endCard{border:3px solid #2ecc71}
+</style>
+
+<script>
+function showOnlineWinner(){
+  if(!window.NET || !NET.enabled) return;
+  const p1 = state.p1||0;
+  const p2 = state.p2||0;
+  if(p1===p2) return;
+
+  const iAmP1 = NET.isHost;
+  const iWin = (iAmP1 && p1>p2) || (!iAmP1 && p2>p1);
+  if(!iWin) return;
+
+  document.getElementById("onlineWinText").textContent =
+    `Κέρδισες με σκορ ${p1} - ${p2}`;
+  document.getElementById("onlineWin").classList.add("show");
+}
+
+// hook after game over
+const __origGameOver = window.showGameOver;
+window.showGameOver = function(){
+  if(__origGameOver) __origGameOver();
+  try{ showOnlineWinner(); }catch(e){}
+};
+</script>
+
 </body>
 </html>
